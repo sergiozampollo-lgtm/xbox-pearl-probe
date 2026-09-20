@@ -1,0 +1,27 @@
+name: Build Xbox arithmetic probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xbox-probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    # Standard Windows builder, not a GPU runner. Builds/tests only; no mining.
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check
+        shell: pwsh
+        run: ./scripts/build-uwp.ps1 -Revision ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pearl-xbox-probe
+          path: |
+            out/PearlProbe.msix
+            out/pearl-probe.cer
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1

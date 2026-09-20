@@ -1,0 +1,16 @@
+/build*/
+/out/
+/uwp/packages/
+/uwp/x64/
+/uwp/Generated Files/
+/uwp/AppPackages/
+/uwp/Generated/
+*.pfx
+*.cer
+*.msix
+*.appx
+*.user
+.vs/
+.DS_Store
+/private/
+/evidence/

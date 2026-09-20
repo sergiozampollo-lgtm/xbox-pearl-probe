@@ -1,0 +1,98 @@
+[
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3.c",
+    "sha256": "b118ddf7cf9e6e5ef3fded72dcb1acf9dfdc4ea923cbe4605900ad6ee9afe1af"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3.h",
+    "sha256": "81bbb11ad1909341565dce4914cc0e5c29718eca27e6950b28f9226a91aaf8c5"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_impl.h",
+    "sha256": "d388dca3574602c8849805ea3c8c0a12d082ac0e428756f305e111942f099af4"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_dispatch.c",
+    "sha256": "134f21550138c0af6312925c988aeee35df287e4119e8ad1d206fccdb2238fe3"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_portable.c",
+    "sha256": "2bc25b0dad67b4329d0b49cfa075ab2b0d04e424addbddc4e9c389c52a192524"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/README.md",
+    "sha256": "73bea639287160d3ccecb78c44d3aea915a922a0cae3794cf0dcd26c3be47dcf"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "LICENSE_CC0",
+    "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "LICENSE_A2",
+    "sha256": "00fcc7a934ddbc9ece2a7cc063ac788e284b703b1d705ccbba72d462aa97921e"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "test_vectors/test_vectors.json",
+    "sha256": "dcb91ea8accc77e6d6e632af7cdc1a99a9f3ae78cf648da595c7d064db32f624"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/api/seed.rs",
+    "sha256": "5855fcd68e4b9ccabf91cf8feb3e7b0f8bf7a59db39fb61357000bb8e1a30dbe",
+    "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/api/proof.rs",
+    "sha256": "168e553da3beb1b2185778839a98dfb06b958290e703eebc724745b292afe7ba",
+    "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/api/sanity_checks.rs",
+    "sha256": "442b8d40802a4445ec54677af2fcf97e69208de5ba73a4322734d5b7665830ac",
+    "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "miner/miner-base/src/miner_base/commitment_hash.py",
+    "sha256": "87de310e0ee197ae357e7af685eed05178157efb3a0f2001f282eb628f0dfe27",
+    "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "miner/miner-base/src/miner_base/noisy_gemm.py",
+    "sha256": "e668e226ce45766438d766924a669bc57aa702a268a86ae6151a224a1136fd90",
+    "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "LICENSE",
+    "sha256": "f88bcb5ffff7a414674de43c9d38508fa55a8065ab13ec112417a1833a9de126",
+    "usage": "reference and ported V3 seed/transcript rules"
+  }
+]
