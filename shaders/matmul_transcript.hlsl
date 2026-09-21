@@ -3,7 +3,7 @@
 ByteAddressBuffer A : register(t0);
 ByteAddressBuffer BT : register(t1);
 RWByteAddressBuffer Output : register(u0);
-cbuffer Shape : register(b0) { uint M; uint N; uint K; uint Rank; };
+cbuffer Shape : register(b0) { uint M; uint N; uint K; uint Rank; uint WriteProducts; };
 
 // Stage 64 K elements at once: each lane loads four signed bytes with one
 // aligned load. This reduces workgroup barriers while retaining every rank
@@ -57,9 +57,10 @@ void CSMain(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID,
             GroupMemoryBarrierWithGroupSync();
         }
     }
-    Output.Store((row*N + col)*4, asuint(sum));
+    if (WriteProducts != 0) Output.Store((row*N + col)*4, asuint(sum));
     if (tid < 16) {
         uint tile = group.y*(N/16) + group.x;
-        Output.Store((M*N + tile*16 + tid)*4, Transcript[tid]);
+        uint offset = WriteProducts != 0 ? M*N : 0;
+        Output.Store((offset + tile*16 + tid)*4, Transcript[tid]);
     }
 }

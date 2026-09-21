@@ -25,6 +25,10 @@ int main() {
         auto fresh=queue.take_for(std::chrono::seconds(5));
         require(fresh && fresh->generation==2,"obsolete task survived job replacement");
         require(fresh->work->job_key==pearl::compute_job_key(header,shape),"wrong job header");
+        const auto full=pearl::reference_matmul(shape,fresh->work->noised);
+        const std::vector<std::uint32_t> compact(full.begin()+shape.cells(),full.end());
+        for(std::size_t tile=0;tile<shape.tiles();++tile)
+            require(fresh->work->transcript(full,tile)==fresh->work->transcript(compact,tile),"compact GPU layout changed a transcript");
         { pearl::WorkQueue waiting(shape,2); } // Destruction wakes idle workers.
         { pearl::WorkQueue busy(shape,2);busy.set_job(header,1,seed); } // Joins active workers.
         std::cout<<"Parallel preparation, nonce uniqueness, job replacement and shutdown passed\n";

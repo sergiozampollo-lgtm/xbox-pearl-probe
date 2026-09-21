@@ -158,8 +158,10 @@ Bytes DenseWork::proof(std::uint32_t ty,std::uint32_t tx) const {
     return out;
 }
 Transcript DenseWork::transcript(const std::vector<std::uint32_t>& out,std::size_t tile) const {
-    if(out.size()!=shape.output_words()||tile>=shape.tiles())throw std::invalid_argument("invalid GPU output shape");
-    Transcript t{};std::copy_n(out.begin()+shape.cells()+tile*16,16,t.begin());return t;
+    const bool compact=out.size()==shape.tiles()*16;
+    if((!compact && out.size()!=shape.output_words())||tile>=shape.tiles())throw std::invalid_argument("invalid GPU output shape");
+    const auto offset=compact?0:shape.cells();
+    Transcript t{};std::copy_n(out.begin()+offset+tile*16,16,t.begin());return t;
 }
 bool meets_base_target(const Hash& hash,const Hash& target,const Shape& s) {
     s.validate_probe();Hash bound{};std::uint64_t carry=0;

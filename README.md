@@ -24,6 +24,9 @@ demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
   tem tamanho limitado e descarta trabalho preparado para tarefas antigas.
 - Tempos separados de preparação, espera, execução GPU e análise dos resultados.
   O tempo do processo também permite medir o uso agregado da CPU.
+- GPU com linhas de memória compartilhada espaçadas, leitura de quatro bytes
+  por thread e blocos de 64 termos entre sincronizações. A mineração transfere
+  de volta apenas as transcrições; o diagnóstico mantém o produto completo.
 - Receita de compilação Windows acionada pelo Mac via GitHub Actions.
 
 O diagnóstico original de aritmética permanece disponível no código. O teste
@@ -73,8 +76,8 @@ espera de GPU acima de 15 segundos interrompe o teste.
 Um resultado `passed` demonstra a equivalência CPU/GPU desses exemplos. A
 validade da prova completa precisa ainda da verificação independente dos
 arquivos exportados. Nenhum dos dois resultados significa share aceita,
-rentabilidade ou estabilidade 24 horas. O shader prioriza correção e ainda
-não foi otimizado.
+rentabilidade ou estabilidade 24 horas. As otimizações mantêm os checkpoints
+de consenso e precisam passar pela mesma comparação exata e verificação externa.
 
 ## Validação ainda pendente
 

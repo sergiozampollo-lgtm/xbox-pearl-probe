@@ -90,7 +90,7 @@ struct Gpu {
 
         D3D12_ROOT_PARAMETER parameters[4]{};
         parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        parameters[0].Constants.Num32BitValues = 4;
+        parameters[0].Constants.Num32BitValues = 5;
         parameters[0].Constants.ShaderRegister = 0;
         parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
         parameters[1].Descriptor.ShaderRegister = 0;
@@ -165,7 +165,10 @@ struct Gpu {
         if(input.a.size()!=std::size_t(shape.m)*shape.k || input.bt.size()!=std::size_t(shape.n)*shape.k)
             throw std::invalid_argument("GPU input size mismatch");
         const auto expected = compare_cpu ? pearl::reference_matmul(shape,input) : std::vector<std::uint32_t>{};
-        const std::size_t output_bytes = shape.output_words()*sizeof(std::uint32_t);
+        // Production needs only the rank transcripts; full matrix products
+        // remain available for the independent CPU/GPU diagnostic.
+        const std::size_t output_words = compare_cpu?shape.output_words():shape.tiles()*16;
+        const std::size_t output_bytes = output_words*sizeof(std::uint32_t);
         if(!cached || cached->a_bytes!=input.a.size() || cached->b_bytes!=input.bt.size() || cached->out_bytes!=output_bytes) {
             // All prior work has completed before replacing a shape's resources.
             cached=std::make_unique<Buffers>();
@@ -201,8 +204,8 @@ struct Gpu {
             if(iteration)begin();
             if (iteration || cached->used) transition(out.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             commands->SetComputeRootSignature(root.Get());
-            const UINT constants[] = {shape.m,shape.n,shape.k,shape.rank};
-            commands->SetComputeRoot32BitConstants(0,4,constants,0);
+            const UINT constants[] = {shape.m,shape.n,shape.k,shape.rank,compare_cpu?1u:0u};
+            commands->SetComputeRoot32BitConstants(0,5,constants,0);
             commands->SetComputeRootShaderResourceView(1,a->GetGPUVirtualAddress());
             commands->SetComputeRootShaderResourceView(2,b->GetGPUVirtualAddress());
             commands->SetComputeRootUnorderedAccessView(3,out->GetGPUVirtualAddress());
@@ -220,7 +223,7 @@ struct Gpu {
             D3D12_RANGE range{0,output_bytes}, no_write{0,0};
             checked(readback->Map(0,&range,&mapped), "result Map");
             const auto* actual = static_cast<const std::uint32_t*>(mapped);
-            output.assign(actual,actual+shape.output_words());
+            output.assign(actual,actual+output_words);
             pearl::Hash output_digest{};
             if(compare_cpu)output_digest=pearl::digest(mapped,output_bytes);
             readback->Unmap(0,&no_write);

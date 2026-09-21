@@ -32,6 +32,7 @@ struct DenseWork {
     Matrices noised;
     DenseWork(const Header&, const Shape&, const Hash& entropy);
     Bytes proof(std::uint32_t tile_row, std::uint32_t tile_col) const;
+    // Accept full diagnostic output or compact production transcripts.
     Transcript transcript(const std::vector<std::uint32_t>& output, std::size_t tile) const;
 };
 
