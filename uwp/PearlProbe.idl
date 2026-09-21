@@ -1,6 +1,6 @@
 namespace PearlProbe
 {
-    runtimeclass App : Windows.ApplicationModel.Core.IFrameworkViewSource
+    runtimeclass App : [default] Windows.ApplicationModel.Core.IFrameworkViewSource
     {
         App();
     }
