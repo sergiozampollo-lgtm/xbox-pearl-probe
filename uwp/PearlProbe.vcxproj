@@ -63,7 +63,9 @@
     <ClCompile Include="App.cpp" />
     <ClCompile Include="module.cpp" />
     <ClCompile Include="GpuProbe.cpp" />
+    <ClCompile Include="ProofProbe.cpp" />
     <ClCompile Include="..\core\pearl_core.cpp" />
+    <ClCompile Include="..\core\pearl_proof.cpp" />
     <ClCompile Include="..\core\self_test.cpp" />
     <ClCompile Include="..\third_party\blake3\blake3.c" />
     <ClCompile Include="..\third_party\blake3\blake3_dispatch.c" />

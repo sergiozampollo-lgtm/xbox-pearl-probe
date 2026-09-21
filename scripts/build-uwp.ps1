@@ -52,4 +52,4 @@ $Sums = @($FinalPackage,"$Output\pearl-probe.cer") | ForEach-Object {
     "$Hash  $(Split-Path $_ -Leaf)"
 }
 $Sums | Set-Content "$Output\SHA256SUMS.txt"
-Write-Host 'Prepared diagnostic package. Mining remains unimplemented.'
+Write-Host 'Prepared offline V3 proof diagnostic. No pool connection or live mining.'

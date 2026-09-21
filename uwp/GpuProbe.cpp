@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include <memory>
 
 using Microsoft::WRL::ComPtr;
 using namespace winrt::Windows::Data::Json;
@@ -151,10 +152,13 @@ struct Gpu {
         resource->Unmap(0,&written);
     }
 
-    JsonObject run(const pearl::Shape& shape, std::uint32_t seed) {
-        const auto input = pearl::probe_matrices(shape,seed);
-        const auto expected = pearl::reference_matmul(shape,input);
-        const std::size_t output_bytes = expected.size()*sizeof(std::uint32_t);
+    JsonObject run(const pearl::Shape& shape, const pearl::Matrices& input,
+                   std::vector<std::uint32_t>& output, bool compare_cpu, unsigned repeat=1) {
+        shape.validate_probe();
+        if(input.a.size()!=std::size_t(shape.m)*shape.k || input.bt.size()!=std::size_t(shape.n)*shape.k)
+            throw std::invalid_argument("GPU input size mismatch");
+        const auto expected = compare_cpu ? pearl::reference_matmul(shape,input) : std::vector<std::uint32_t>{};
+        const std::size_t output_bytes = shape.output_words()*sizeof(std::uint32_t);
         auto a_upload = buffer(input.a.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         auto b_upload = buffer(input.bt.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         auto a = buffer(input.a.size(),D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
@@ -177,7 +181,7 @@ struct Gpu {
         flush();
 
         JsonArray iterations;
-        for (unsigned iteration=0; iteration<4; ++iteration) {
+        for (unsigned iteration=0; iteration<repeat; ++iteration) {
             begin();
             if (iteration) transition(out.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             commands->SetComputeRootSignature(root.Get());
@@ -200,12 +204,11 @@ struct Gpu {
             D3D12_RANGE range{0,output_bytes}, no_write{0,0};
             checked(readback->Map(0,&range,&mapped), "result Map");
             const auto* actual = static_cast<const std::uint32_t*>(mapped);
-            const auto mismatch = std::mismatch(expected.begin(),expected.end(),actual);
-            const auto mismatch_index = static_cast<std::size_t>(mismatch.first-expected.begin());
+            output.assign(actual,actual+shape.output_words());
             const auto digest = pearl::digest(mapped,output_bytes);
             readback->Unmap(0,&no_write);
-            if (mismatch_index != expected.size())
-                throw std::runtime_error("GPU/CPU mismatch at word " + std::to_string(mismatch_index));
+            if (compare_cpu && output != expected)
+                throw std::runtime_error("GPU/CPU output mismatch");
             D3D12_RANGE time_range{0,2*sizeof(UINT64)};
             checked(timing->Map(0,&time_range,&mapped), "timestamp Map");
             UINT64 ticks[2];
@@ -217,7 +220,8 @@ struct Gpu {
             record.Insert(L"warmup",JsonValue::CreateBooleanValue(iteration==0));
             record.Insert(L"gpu_ms",JsonValue::CreateNumberValue(gpu_ms));
             record.Insert(L"submit_wait_ms",JsonValue::CreateNumberValue(std::chrono::duration<double,std::milli>(finish-start).count()));
-            record.Insert(L"full_output_match",JsonValue::CreateBooleanValue(true));
+            record.Insert(L"cpu_comparison_performed",JsonValue::CreateBooleanValue(compare_cpu));
+            if(compare_cpu) record.Insert(L"full_output_match",JsonValue::CreateBooleanValue(true));
             record.Insert(L"output_blake3",JsonValue::CreateStringValue(winrt::to_hstring(pearl::to_hex(digest))));
             iterations.Append(record);
         }
@@ -247,9 +251,19 @@ JsonObject run_gpu_probe() {
             result.Insert(L"dxgi_local_budget_bytes",JsonValue::CreateNumberValue(static_cast<double>(memory.Budget)));
     }
     JsonArray cases;
-    cases.Append(gpu.run({16,32,2048},0x1234));
-    cases.Append(gpu.run({32,48,4096},0x9876));
-    cases.Append(gpu.run({128,128,4096},0xabcd));
+    std::vector<std::uint32_t> output;
+    cases.Append(gpu.run({16,32,2048},pearl::probe_matrices({16,32,2048},0x1234),output,true,4));
+    cases.Append(gpu.run({32,48,4096},pearl::probe_matrices({32,48,4096},0x9876),output,true,4));
+    cases.Append(gpu.run({128,128,4096},pearl::probe_matrices({128,128,4096},0xabcd),output,true,4));
     result.Insert(L"cases",cases);
+    return result;
+}
+
+GpuWorkResult run_gpu_work(const pearl::Shape& shape,const pearl::Matrices& input,bool compare_cpu) {
+    static thread_local std::unique_ptr<Gpu> gpu;
+    if(!gpu)gpu=std::make_unique<Gpu>();
+    GpuWorkResult result;
+    result.measurements=gpu->run(shape,input,result.output,compare_cpu);
+    result.measurements.Insert(L"software_adapter",JsonValue::CreateBooleanValue(false));
     return result;
 }

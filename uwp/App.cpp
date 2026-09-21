@@ -1,5 +1,6 @@
 #include "App.h"
 #include "GpuProbe.h"
+#include "ProofProbe.h"
 #include "pearl_core.h"
 #include <Windows.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
@@ -52,14 +53,14 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                 result.Insert(L"stage",JsonValue::CreateStringValue(L"core_reference_tests"));
                 result.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(false));
                 result.Insert(L"shares_submitted",JsonValue::CreateNumberValue(0));
-                result.Insert(L"scope",JsonValue::CreateStringValue(L"V3 seeds + synthetic integer matmul/transcript, not a mining proof"));
+                result.Insert(L"scope",JsonValue::CreateStringValue(L"Complete dense V3 proof fixtures on GPU; offline test target only"));
                 result.Insert(L"device_family",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamily()));
                 result.Insert(L"os_version",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamilyVersion()));
                 write_result(result);
                 result.Insert(L"core_checks",JsonValue::CreateNumberValue(pearl::self_test()));
-                result.Insert(L"stage",JsonValue::CreateStringValue(L"d3d12_matmul_transcript"));
+                result.Insert(L"stage",JsonValue::CreateStringValue(L"complete_v3_gpu_proofs"));
                 write_result(result);
-                result.Insert(L"gpu",run_gpu_probe());
+                result.Insert(L"proofs",run_proof_probe());
                 result.Insert(L"status",JsonValue::CreateStringValue(L"passed"));
             } catch (const hresult_error& e) {
                 result.Insert(L"status",JsonValue::CreateStringValue(L"failed"));

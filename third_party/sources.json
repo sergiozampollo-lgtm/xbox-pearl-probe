@@ -94,5 +94,40 @@
     "path": "LICENSE",
     "sha256": "f88bcb5ffff7a414674de43c9d38508fa55a8065ab13ec112417a1833a9de126",
     "usage": "reference and ported V3 seed/transcript rules"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/api/proof_utils.rs",
+    "sha256": "2b28b65d89eb91c1de1763b3384ce9aab6bac547da5c381ad27308a43cdeb2b0",
+    "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/api/verify.rs",
+    "sha256": "80f9ba169400163623f3ddbff7b2dcc86429532e1a71820cd5b16d619a9185cc",
+    "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/circuit/pearl_noise.rs",
+    "sha256": "fe046cff6756e1dc768898a4f5fe2290321a59d4ecc45c0e18d9b6724f42f9c7",
+    "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "zk-pow/src/ffi/plain_proof.rs",
+    "sha256": "2c8266340c60cb9e4eacb44d1c74f1412e46c1d39278bd79c9144a35be82d171",
+    "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
+  },
+  {
+    "repo": "pearl-research-labs/pearl",
+    "commit": "5b09d844e4069440933722c51495ac24a7bb4886",
+    "path": "pearl-blake3/src/merkle.rs",
+    "sha256": "5372a95d7e7e3563eb537a0b98522080cbaa5656ba08452e9d467eaa56e12961",
+    "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
   }
 ]
