@@ -1,12 +1,15 @@
-// Correctness-first diagnostic, cs_5_1. No model, network job, or proof submitted.
+// Exact integer compute, cs_5_1. The host owns proof validation and networking.
 // Contiguous 16x16 output/hash tile. Rank=128; inputs are packed signed bytes.
 ByteAddressBuffer A : register(t0);
 ByteAddressBuffer BT : register(t1);
 RWByteAddressBuffer Output : register(u0);
 cbuffer Shape : register(b0) { uint M; uint N; uint K; uint Rank; };
 
-groupshared int TileA[16][16];
-groupshared int TileBT[16][16];
+// An odd row stride avoids the repeated 16-DWORD bank mapping when lanes
+// read BT by column. Padding changes storage only, not consensus arithmetic.
+// https://gpuopen.com/learn/rdna-performance-guide/#compute-shaders
+groupshared int TileA[16][17];
+groupshared int TileBT[16][17];
 groupshared uint Reduction[256];
 groupshared uint Transcript[16];
 
