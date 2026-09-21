@@ -20,6 +20,10 @@ demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
   de shares baseada nas respostas do pool. O Mac não executa mineração.
 - Duração limitada para testes ou operação contínua explicitamente ativada
   na configuração privada, com reconexão de rede e encerramento ao fechar o app.
+- Preparação em 1 a 6 threads de CPU, sobreposta ao cálculo na GPU. A fila
+  tem tamanho limitado e descarta trabalho preparado para tarefas antigas.
+- Tempos separados de preparação, espera, execução GPU e análise dos resultados.
+  O tempo do processo também permite medir o uso agregado da CPU.
 - Receita de compilação Windows acionada pelo Mac via GitHub Actions.
 
 O diagnóstico original de aritmética permanece disponível no código. O teste
@@ -94,6 +98,10 @@ A configuração `pearl-mining-config.json`, fornecida privadamente na pasta
 Para operação contínua, definir explicitamente `continuous: true` e
 `run_seconds: 0`; nessa modalidade não há encerramento automático por tempo.
 Sem `continuous`, a duração padrão continua sendo 120 segundos.
+`preparation_workers` controla a preparação CPU (1 a 6; padrão 3).
+M e N aceitam múltiplos de 16 até 2048; cada envio à GPU está limitado a
+2^34 unidades de trabalho. Aumentar dimensões ou threads exige medir o ganho
+e conferir as provas; esses parâmetros não alteram a frequência do hardware.
 O aplicativo conecta diretamente ao domínio Kryptex por TLS com validação
 normal do certificado. Nenhuma conta é incluída no pacote ou no repositório.
 
@@ -106,6 +114,10 @@ Essa interpretação precisa ainda ser confirmada por aceitação real no pool.
 
 `pearl-mining-status.json` separa tentativas, unidades de trabalho calculadas,
 envios e aceitações. As unidades locais **não são hashrate efetivo creditado**.
+`gpu_kernel_duty_percent` é a fração de tempo coberta pelos timestamps dos
+kernels deste processo, não uma contagem de CUs ocupadas. O tempo de CPU
+agregado é expresso em equivalentes de processadores lógicos ocupados;
+não demonstra acesso a toda a CPU física do console.
 Erros de conexão geram reconexão; versão de certificado diferente de 3 ou
 divergência de cálculo interrompem a sessão, inclusive em modo contínuo.
 A operação requer foreground: fechar o aplicativo ou reiniciar o console

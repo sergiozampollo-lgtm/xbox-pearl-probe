@@ -78,9 +78,9 @@ Hash jackpot_hash(const Transcript& transcript, const Hash& a_seed) {
 
 void Shape::validate_probe() const {
     // This bound also keeps every signed int8 dot product safely inside int32.
-    if (m == 0 || n == 0 || m > 512 || n > 512 || m % 16 || n % 16 ||
-        k < 2048 || k > 16384 || k % rank)
-        throw std::invalid_argument("probe requires M,N=16..512 (step 16), K=2048..16384 (step 128)");
+    if (m == 0 || n == 0 || m > 2048 || n > 2048 || m % 16 || n % 16 ||
+        k < 2048 || k > 16384 || k % rank || std::uint64_t(m)*n*k > (std::uint64_t(1)<<34))
+        throw std::invalid_argument("requires M,N=16..2048 (step 16), K=2048..16384 (step 128), at most 2^34 work units per dispatch");
 }
 std::size_t Shape::cells() const { return static_cast<std::size_t>(m) * n; }
 std::size_t Shape::tiles() const { return static_cast<std::size_t>(m/16) * (n/16); }

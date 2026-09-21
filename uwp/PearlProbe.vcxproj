@@ -68,6 +68,7 @@
     <ClCompile Include="..\core\pearl_core.cpp" />
     <ClCompile Include="..\core\pearl_proof.cpp" />
     <ClCompile Include="..\core\self_test.cpp" />
+    <ClCompile Include="..\core\work_queue.cpp" />
     <ClCompile Include="..\third_party\blake3\blake3.c" />
     <ClCompile Include="..\third_party\blake3\blake3_dispatch.c" />
     <ClCompile Include="..\third_party\blake3\blake3_portable.c" />

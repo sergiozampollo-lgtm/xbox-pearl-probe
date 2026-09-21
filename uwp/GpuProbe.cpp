@@ -194,11 +194,11 @@ struct Gpu {
         commands->CopyBufferRegion(b.Get(),0,b_upload.Get(),0,input.bt.size());
         transition(a.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         transition(b.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        flush();
-
         JsonArray iterations;
         for (unsigned iteration=0; iteration<repeat; ++iteration) {
-            begin();
+            // Upload and first dispatch share a submission; there is no CPU
+            // fence wait between them. The existing barriers order the copies.
+            if(iteration)begin();
             if (iteration || cached->used) transition(out.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             commands->SetComputeRootSignature(root.Get());
             const UINT constants[] = {shape.m,shape.n,shape.k,shape.rank};
@@ -221,7 +221,8 @@ struct Gpu {
             checked(readback->Map(0,&range,&mapped), "result Map");
             const auto* actual = static_cast<const std::uint32_t*>(mapped);
             output.assign(actual,actual+shape.output_words());
-            const auto digest = pearl::digest(mapped,output_bytes);
+            pearl::Hash output_digest{};
+            if(compare_cpu)output_digest=pearl::digest(mapped,output_bytes);
             readback->Unmap(0,&no_write);
             if (compare_cpu && output != expected)
                 throw std::runtime_error("GPU/CPU output mismatch");
@@ -238,7 +239,7 @@ struct Gpu {
             record.Insert(L"submit_wait_ms",JsonValue::CreateNumberValue(std::chrono::duration<double,std::milli>(finish-start).count()));
             record.Insert(L"cpu_comparison_performed",JsonValue::CreateBooleanValue(compare_cpu));
             if(compare_cpu) record.Insert(L"full_output_match",JsonValue::CreateBooleanValue(true));
-            record.Insert(L"output_blake3",JsonValue::CreateStringValue(winrt::to_hstring(pearl::to_hex(digest))));
+            if(compare_cpu)record.Insert(L"output_blake3",JsonValue::CreateStringValue(winrt::to_hstring(pearl::to_hex(output_digest))));
             iterations.Append(record);
         }
         JsonObject result;

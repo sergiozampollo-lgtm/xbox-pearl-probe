@@ -1,6 +1,8 @@
 #include "MiningSession.h"
 #include "GpuProbe.h"
 #include "pearl_proof.h"
+#include "work_queue.h"
+#include <Windows.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Networking.h>
@@ -30,6 +32,12 @@ using namespace winrt::Windows::Storage::Streams;
 using Clock = std::chrono::steady_clock;
 
 namespace {
+std::optional<double> process_cpu_seconds() {
+    FILETIME created{},exited{},kernel{},user{};
+    if(!GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user))return {};
+    const auto ticks=[](FILETIME t) { return (std::uint64_t(t.dwHighDateTime)<<32)|t.dwLowDateTime; };
+    return static_cast<double>(ticks(kernel)+ticks(user))/10000000.0;
+}
 void string_field(JsonObject& o,const wchar_t* k,const std::string& v) { o.Insert(k,JsonValue::CreateStringValue(to_hstring(v))); }
 void number_field(JsonObject& o,const wchar_t* k,double v) { o.Insert(k,JsonValue::CreateNumberValue(v)); }
 void save_text(const wchar_t* name,const JsonObject& o) {
@@ -182,15 +190,22 @@ JsonObject run_mining_session(const JsonObject& config) {
         static_cast<std::uint32_t>(config.GetNamedNumber(L"n",256)),static_cast<std::uint32_t>(config.GetNamedNumber(L"k",4096))};
     shape.validate_probe();(void)pearl::mining_config(shape);
     const bool continuous=config.GetNamedBoolean(L"continuous",false);
+    const auto worker_count=config.GetNamedNumber(L"preparation_workers",3);
+    if(!std::isfinite(worker_count) || worker_count<1 || worker_count>6 || worker_count!=std::floor(worker_count))
+        throw std::runtime_error("preparation_workers must be an integer in 1..6");
+    const auto workers=static_cast<unsigned>(worker_count);
     const double duration=config.GetNamedNumber(L"run_seconds",continuous?0:120);
     if(!std::isfinite(duration) || (continuous?duration!=0:(duration<1||duration>86400)))
         throw std::runtime_error("continuous sessions require run_seconds=0; bounded sessions require 1 to 86400");
     const auto start=Clock::now();auto last_save=start-std::chrono::seconds(10);
+    const auto cpu_start=process_cpu_seconds();
     const auto should_continue=[&] {
         return continuous || std::chrono::duration<double>(Clock::now()-start).count()<duration;
     };
     std::uint64_t batches=0,attempts=0,submitted=0,accepted=0,rejected=0,reconnects=0;
     double work_units=0,gpu_seconds=0;bool sample_saved=false;std::string error;
+    double preparation_seconds=0,preparation_wait_seconds=0,gpu_wall_seconds=0,cpu_results_seconds=0;
+    std::uint64_t discarded_prepared_work=0;
     JsonObject status;
     auto record=[&](const char* stage,Pool* pool) {
         std::uint64_t s=0,a=0,r=0;bool auth=false;std::string connection_error,response;
@@ -201,6 +216,8 @@ JsonObject run_mining_session(const JsonObject& config) {
         status.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(true));
         status.Insert(L"continuous",JsonValue::CreateBooleanValue(continuous));
         number_field(status,L"run_seconds",duration);
+        number_field(status,L"m",shape.m);number_field(status,L"n",shape.n);number_field(status,L"k",shape.k);
+        number_field(status,L"preparation_workers",workers);
         status.Insert(L"authorized",JsonValue::CreateBooleanValue(auth));
         status.Insert(L"pool_target_interpretation_confirmed_by_acceptance",JsonValue::CreateBooleanValue(accepted+a>0));
         number_field(status,L"elapsed_seconds",elapsed);number_field(status,L"batches",static_cast<double>(batches));
@@ -211,6 +228,19 @@ JsonObject run_mining_session(const JsonObject& config) {
         number_field(status,L"gpu_seconds",gpu_seconds);number_field(status,L"shares_submitted",static_cast<double>(submitted+s));
         number_field(status,L"shares_accepted",static_cast<double>(accepted+a));number_field(status,L"shares_rejected",static_cast<double>(rejected+r));
         number_field(status,L"reconnections",static_cast<double>(reconnects));
+        number_field(status,L"cpu_preparation_seconds_sum",preparation_seconds);
+        number_field(status,L"preparation_wait_seconds",preparation_wait_seconds);
+        number_field(status,L"gpu_wall_seconds",gpu_wall_seconds);
+        number_field(status,L"cpu_results_seconds",cpu_results_seconds);
+        number_field(status,L"gpu_kernel_duty_percent",elapsed>0?100*gpu_seconds/elapsed:0);
+        number_field(status,L"discarded_prepared_work",static_cast<double>(discarded_prepared_work));
+        number_field(status,L"reported_logical_processors",std::thread::hardware_concurrency());
+        const auto cpu_now=process_cpu_seconds();
+        status.Insert(L"process_cpu_time_available",JsonValue::CreateBooleanValue(bool(cpu_start)&&bool(cpu_now)));
+        if(cpu_start && cpu_now) {
+            number_field(status,L"process_cpu_seconds",*cpu_now-*cpu_start);
+            number_field(status,L"process_cpu_core_equivalent",elapsed>0?(*cpu_now-*cpu_start)/elapsed:0);
+        }
         save_text(L"pearl-mining-status.json",status);last_save=Clock::now();
     };
     while(should_continue()) {
@@ -220,20 +250,36 @@ JsonObject run_mining_session(const JsonObject& config) {
         catch(const hresult_error& e){error=to_string(e.message());}
         catch(const std::exception& e){error=e.what();}
         if(!pool){++reconnects;record("reconnecting",nullptr);std::this_thread::sleep_for(std::chrono::seconds(3));continue;}
+        auto preparation=std::make_unique<pearl::WorkQueue>(shape,workers);
+        std::uint64_t preparation_generation=0;
         error.clear();
         while(!pool->dead && should_continue()) {
             if(Clock::now()-last_save>std::chrono::seconds(5))record("running",pool.get());
             const auto job=pool->current();
             if(!job){std::this_thread::sleep_for(std::chrono::milliseconds(100));continue;}
-            com_array<std::uint8_t> random;CryptographicBuffer::CopyToByteArray(CryptographicBuffer::GenerateRandom(32),random);
-            pearl::Hash entropy{};std::copy(random.begin(),random.end(),entropy.begin());
-            pearl::DenseWork work(job->header,shape,entropy);
+            if(job->sequence!=preparation_generation) {
+                com_array<std::uint8_t> random;CryptographicBuffer::CopyToByteArray(CryptographicBuffer::GenerateRandom(32),random);
+                pearl::Hash seed{};std::copy(random.begin(),random.end(),seed.begin());
+                preparation->set_job(job->header,job->sequence,seed);preparation_generation=job->sequence;
+            }
+            auto phase_start=Clock::now();
+            auto prepared=preparation->take_for(std::chrono::milliseconds(50));
+            preparation_wait_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
+            if(!prepared)continue;
+            const auto latest=pool->current();
+            if(!latest || prepared->generation!=latest->sequence) {++discarded_prepared_work;continue;}
+            const auto& work=*prepared->work;
+            preparation_seconds+=prepared->preparation_seconds;
+            phase_start=Clock::now();
             const auto gpu=run_gpu_work(shape,work.noised,false);
+            gpu_wall_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
+            phase_start=Clock::now();
             ++batches;attempts+=shape.tiles();work_units+=static_cast<double>(shape.m)*shape.n*shape.k;
             gpu_seconds+=gpu.measurements.GetNamedArray(L"iterations").GetObjectAt(0).GetNamedNumber(L"gpu_ms")/1000.0;
             // Validate an actual job on CPU before enabling any submissions.
             if(!sample_saved) {
                 check_tile(work,gpu,0);
+                check_tile(work,gpu,shape.tiles()-1);
                 save_bytes(L"pearl-live-header.bin",job->header);save_bytes(L"pearl-live-proof.bin",work.proof(0,0));
                 JsonObject sample;string_field(sample,L"job_id",job->id);string_field(sample,L"target_be",pearl::to_hex(job->target));
                 string_field(sample,L"jackpot_le",pearl::to_hex(pearl::jackpot_hash(work.transcript(gpu.output,0),work.seeds.a)));
@@ -251,7 +297,9 @@ JsonObject run_mining_session(const JsonObject& config) {
                 catch(const hresult_error& e){error=to_string(e.message());pool->dead=true;break;}
                 catch(const std::exception& e){error=e.what();pool->dead=true;break;}
             }
+            cpu_results_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
         }
+        preparation.reset(); // Join CPU workers before disposing of this pool session.
         bool fatal;
         {std::lock_guard<std::mutex> lock(pool->mutex);submitted+=pool->submitted;accepted+=pool->accepted;rejected+=pool->rejected;error=pool->error;fatal=pool->fatal;}
         pool.reset();
