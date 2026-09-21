@@ -1,9 +1,9 @@
 # Pearl GPU Probe para Xbox Series S
 
-Protótipo de desenvolvimento preparado a partir de um Mac. **Ainda não é um
-minerador**: não recebe tarefas do pool, envia shares ou produz saldo.
-Gera provas densas V3 completas para um teste offline, antes da integração
-com uma tarefa real de mineração.
+Protótipo de desenvolvimento preparado a partir de um Mac. Gera provas densas
+V3 completas e inclui uma sessão experimental de mineração direta por TLS,
+ativada somente por configuração privada. **Ainda não há share aceita ou receita
+demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
 
 ## O que está implementado
 
@@ -15,7 +15,9 @@ com uma tarefa real de mineração.
   cumulativa a cada 128 termos e acumulação de 16 palavras com rotação de 13 bits.
 - Shader HLSL equivalente, com entradas de 8 bits empacotadas e acumulador de
   32 bits; compilação antecipada para `cs_5_1`.
-- Aplicativo UWP x64 separado do xllama, sem permissões de rede ou microfone.
+- Aplicativo UWP x64 separado do xllama, com apenas a capacidade `internetClient`.
+- Sessão TLS com autorização, tarefas V3, descarte de trabalho antigo e contagem
+  de shares baseada nas respostas do pool. O Mac não executa mineração.
 - Receita de compilação Windows acionada pelo Mac via GitHub Actions.
 
 O diagnóstico original de aritmética permanece disponível no código. O teste
@@ -70,11 +72,33 @@ não foi otimizado.
 
 ## Trabalho que falta para minerar
 
-1. Confirmar as provas completas produzidas no Xbox pelo verificador oficial.
-2. Integrar tarefas e alvos atuais da Kryptex, respeitando `cert_version`,
-   cancelamento de tarefas antigas e a interpretação correta dos inteiros.
-3. Obter trabalho aceito pelo pool e medir a taxa efetiva.
-4. Só então comparar receita e testar continuidade prolongada.
+As três provas completas exportadas pelo Xbox já passaram no verificador Rust
+oficial; são idênticas, byte a byte, às provas C++ de referência. Cinco alterações
+deliberadas nos arquivos do Xbox também foram rejeitadas.
+
+1. Validar a sessão com tarefas atuais, incluindo a interpretação do alvo do pool.
+2. Obter trabalho aceito pelo pool e medir a taxa efetiva.
+3. Só então comparar receita e testar continuidade prolongada.
+
+## Sessão experimental direta
+
+A configuração `pearl-mining-config.json`, fornecida privadamente na pasta
+`LocalState`, precisa conter `mining_enabled: true`, `host`, `port: 8048`,
+`wallet`, `worker`, `pass`, `m`, `n`, `k` e `run_seconds` (1 a 86400).
+O aplicativo conecta diretamente ao domínio Kryptex por TLS com validação
+normal do certificado. Nenhuma conta é incluída no pacote ou no repositório.
+
+O primeiro bloco calculado gera `pearl-live-header.bin`, `pearl-live-proof.bin`
+e `pearl-live-sample.json` para verificação externa; essa amostra não é enviada
+ao pool. A sessão compara uma transcrição real com a CPU antes de habilitar
+envios e verifica cada candidato antes de submetê-lo. Só envia candidatos que
+atingem o alvo base anunciado multiplicado pelo fator de trabalho `256*K`.
+Essa interpretação precisa ainda ser confirmada por aceitação real no pool.
+
+`pearl-mining-status.json` separa tentativas, unidades de trabalho calculadas,
+envios e aceitações. As unidades locais **não são hashrate efetivo creditado**.
+Erros de conexão geram reconexão; versão de certificado diferente de 3 ou
+divergência de cálculo interrompem a sessão. A operação requer foreground.
 
 Dados de conta/pagamento, respostas privadas do pool, endereço do console,
 capturas de tela e diagnósticos pessoais **não fazem parte deste projeto**.

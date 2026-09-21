@@ -1,4 +1,4 @@
-name: Build Xbox Pearl proof probe
+name: Build Xbox Pearl prototype
 on:
   workflow_dispatch:
 permissions:

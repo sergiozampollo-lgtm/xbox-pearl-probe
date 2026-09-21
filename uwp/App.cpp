@@ -1,6 +1,7 @@
 #include "App.h"
 #include "GpuProbe.h"
 #include "ProofProbe.h"
+#include "MiningSession.h"
 #include "pearl_core.h"
 #include <Windows.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
@@ -58,10 +59,22 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                 result.Insert(L"os_version",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamilyVersion()));
                 write_result(result);
                 result.Insert(L"core_checks",JsonValue::CreateNumberValue(pearl::self_test()));
-                result.Insert(L"stage",JsonValue::CreateStringValue(L"complete_v3_gpu_proofs"));
-                write_result(result);
-                result.Insert(L"proofs",run_proof_probe());
-                result.Insert(L"status",JsonValue::CreateStringValue(L"passed"));
+                auto config_file=ApplicationData::Current().LocalFolder().TryGetItemAsync(L"pearl-mining-config.json").get();
+                if(config_file) {
+                    const auto config=JsonObject::Parse(FileIO::ReadTextAsync(config_file.as<StorageFile>()).get());
+                    result.Insert(L"stage",JsonValue::CreateStringValue(L"live_pool_session"));
+                    result.Insert(L"scope",JsonValue::CreateStringValue(L"Bounded live Pearl V3 session; revenue requires pool acknowledgement"));
+                    result.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(true));write_result(result);
+                    const auto mining=run_mining_session(config);
+                    result.Insert(L"mining",mining);
+                    result.Insert(L"shares_submitted",mining.GetNamedValue(L"shares_submitted"));
+                    result.Insert(L"status",JsonValue::CreateStringValue(mining.GetNamedString(L"stage")==L"completed_bounded_run"?L"completed":L"failed"));
+                } else {
+                    result.Insert(L"stage",JsonValue::CreateStringValue(L"complete_v3_gpu_proofs"));
+                    write_result(result);
+                    result.Insert(L"proofs",run_proof_probe());
+                    result.Insert(L"status",JsonValue::CreateStringValue(L"passed"));
+                }
             } catch (const hresult_error& e) {
                 result.Insert(L"status",JsonValue::CreateStringValue(L"failed"));
                 result.Insert(L"error",JsonValue::CreateStringValue(e.message()));
