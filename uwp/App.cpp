@@ -64,7 +64,7 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                 if(config_file) {
                     const auto config=JsonObject::Parse(FileIO::ReadTextAsync(config_file.as<StorageFile>()).get());
                     result.Insert(L"stage",JsonValue::CreateStringValue(L"live_pool_session"));
-                    result.Insert(L"scope",JsonValue::CreateStringValue(L"Bounded live Pearl V3 session; revenue requires pool acknowledgement"));
+                    result.Insert(L"scope",JsonValue::CreateStringValue(L"Live Pearl V3 session; revenue requires pool acknowledgement"));
                     result.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(true));write_result(result);
                     const auto mining=run_mining_session(config);
                     result.Insert(L"mining",mining);

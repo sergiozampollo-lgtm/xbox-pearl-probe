@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -180,9 +181,14 @@ JsonObject run_mining_session(const JsonObject& config) {
     const pearl::Shape shape{static_cast<std::uint32_t>(config.GetNamedNumber(L"m",256)),
         static_cast<std::uint32_t>(config.GetNamedNumber(L"n",256)),static_cast<std::uint32_t>(config.GetNamedNumber(L"k",4096))};
     shape.validate_probe();(void)pearl::mining_config(shape);
-    const double duration=config.GetNamedNumber(L"run_seconds",120);
-    if(duration<1||duration>86400)throw std::runtime_error("run_seconds must be between 1 and 86400");
+    const bool continuous=config.GetNamedBoolean(L"continuous",false);
+    const double duration=config.GetNamedNumber(L"run_seconds",continuous?0:120);
+    if(!std::isfinite(duration) || (continuous?duration!=0:(duration<1||duration>86400)))
+        throw std::runtime_error("continuous sessions require run_seconds=0; bounded sessions require 1 to 86400");
     const auto start=Clock::now();auto last_save=start-std::chrono::seconds(10);
+    const auto should_continue=[&] {
+        return continuous || std::chrono::duration<double>(Clock::now()-start).count()<duration;
+    };
     std::uint64_t batches=0,attempts=0,submitted=0,accepted=0,rejected=0,reconnects=0;
     double work_units=0,gpu_seconds=0;bool sample_saved=false;std::string error;
     JsonObject status;
@@ -193,6 +199,8 @@ JsonObject run_mining_session(const JsonObject& config) {
         string_field(status,L"stage",stage);string_field(status,L"error",connection_error.empty()?error:connection_error);
         if(!response.empty())string_field(status,L"last_submit_response",response);
         status.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(true));
+        status.Insert(L"continuous",JsonValue::CreateBooleanValue(continuous));
+        number_field(status,L"run_seconds",duration);
         status.Insert(L"authorized",JsonValue::CreateBooleanValue(auth));
         status.Insert(L"pool_target_interpretation_confirmed_by_acceptance",JsonValue::CreateBooleanValue(accepted+a>0));
         number_field(status,L"elapsed_seconds",elapsed);number_field(status,L"batches",static_cast<double>(batches));
@@ -205,14 +213,15 @@ JsonObject run_mining_session(const JsonObject& config) {
         number_field(status,L"reconnections",static_cast<double>(reconnects));
         save_text(L"pearl-mining-status.json",status);last_save=Clock::now();
     };
-    while(std::chrono::duration<double>(Clock::now()-start).count()<duration) {
+    while(should_continue()) {
         record("connecting",nullptr);
         std::unique_ptr<Pool> pool;
         try {pool=std::make_unique<Pool>(config);}
         catch(const hresult_error& e){error=to_string(e.message());}
         catch(const std::exception& e){error=e.what();}
         if(!pool){++reconnects;record("reconnecting",nullptr);std::this_thread::sleep_for(std::chrono::seconds(3));continue;}
-        while(!pool->dead && std::chrono::duration<double>(Clock::now()-start).count()<duration) {
+        error.clear();
+        while(!pool->dead && should_continue()) {
             if(Clock::now()-last_save>std::chrono::seconds(5))record("running",pool.get());
             const auto job=pool->current();
             if(!job){std::this_thread::sleep_for(std::chrono::milliseconds(100));continue;}
@@ -247,7 +256,7 @@ JsonObject run_mining_session(const JsonObject& config) {
         {std::lock_guard<std::mutex> lock(pool->mutex);submitted+=pool->submitted;accepted+=pool->accepted;rejected+=pool->rejected;error=pool->error;fatal=pool->fatal;}
         pool.reset();
         if(fatal){record("stopped_by_protocol_error",nullptr);return status;}
-        if(std::chrono::duration<double>(Clock::now()-start).count()<duration)++reconnects;
+        if(should_continue())++reconnects;
     }
     record("completed_bounded_run",nullptr);return status;
 }

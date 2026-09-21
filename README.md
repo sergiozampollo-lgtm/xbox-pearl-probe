@@ -18,6 +18,8 @@ demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
 - Aplicativo UWP x64 separado do xllama, com apenas a capacidade `internetClient`.
 - Sessão TLS com autorização, tarefas V3, descarte de trabalho antigo e contagem
   de shares baseada nas respostas do pool. O Mac não executa mineração.
+- Duração limitada para testes ou operação contínua explicitamente ativada
+  na configuração privada, com reconexão de rede e encerramento ao fechar o app.
 - Receita de compilação Windows acionada pelo Mac via GitHub Actions.
 
 O diagnóstico original de aritmética permanece disponível no código. O teste
@@ -70,13 +72,17 @@ arquivos exportados. Nenhum dos dois resultados significa share aceita,
 rentabilidade ou estabilidade 24 horas. O shader prioriza correção e ainda
 não foi otimizado.
 
-## Trabalho que falta para minerar
+## Validação ainda pendente
 
 As três provas completas exportadas pelo Xbox já passaram no verificador Rust
 oficial; são idênticas, byte a byte, às provas C++ de referência. Cinco alterações
 deliberadas nos arquivos do Xbox também foram rejeitadas.
 
-1. Validar a sessão com tarefas atuais, incluindo a interpretação do alvo do pool.
+Provas de tarefas atuais, recebidas diretamente no Xbox, também passaram na
+verificação independente de estrutura e matemática. Isso não demonstra que uma
+prova atingiu a dificuldade real ou recebeu crédito do pool.
+
+1. Confirmar a interpretação do alvo pela aceitação de uma share real.
 2. Obter trabalho aceito pelo pool e medir a taxa efetiva.
 3. Só então comparar receita e testar continuidade prolongada.
 
@@ -85,6 +91,9 @@ deliberadas nos arquivos do Xbox também foram rejeitadas.
 A configuração `pearl-mining-config.json`, fornecida privadamente na pasta
 `LocalState`, precisa conter `mining_enabled: true`, `host`, `port: 8048`,
 `wallet`, `worker`, `pass`, `m`, `n`, `k` e `run_seconds` (1 a 86400).
+Para operação contínua, definir explicitamente `continuous: true` e
+`run_seconds: 0`; nessa modalidade não há encerramento automático por tempo.
+Sem `continuous`, a duração padrão continua sendo 120 segundos.
 O aplicativo conecta diretamente ao domínio Kryptex por TLS com validação
 normal do certificado. Nenhuma conta é incluída no pacote ou no repositório.
 
@@ -98,7 +107,11 @@ Essa interpretação precisa ainda ser confirmada por aceitação real no pool.
 `pearl-mining-status.json` separa tentativas, unidades de trabalho calculadas,
 envios e aceitações. As unidades locais **não são hashrate efetivo creditado**.
 Erros de conexão geram reconexão; versão de certificado diferente de 3 ou
-divergência de cálculo interrompem a sessão. A operação requer foreground.
+divergência de cálculo interrompem a sessão, inclusive em modo contínuo.
+A operação requer foreground: fechar o aplicativo ou reiniciar o console
+interrompe a mineração. O aplicativo não instala um mecanismo de inicialização
+automática após reinício. Operação contínua habilitada não equivale a estabilidade
+de 24 horas já demonstrada.
 
 Dados de conta/pagamento, respostas privadas do pool, endereço do console,
 capturas de tela e diagnósticos pessoais **não fazem parte deste projeto**.
