@@ -8,7 +8,6 @@
 #include <winrt/Windows.Security.Cryptography.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
-#include <winrt/Windows.System.Display.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -180,8 +179,6 @@ JsonObject run_mining_session(const JsonObject& config) {
     shape.validate_probe();(void)pearl::mining_config(shape);
     const double duration=config.GetNamedNumber(L"run_seconds",120);
     if(duration<1||duration>86400)throw std::runtime_error("run_seconds must be between 1 and 86400");
-    winrt::Windows::System::Display::DisplayRequest display;
-    display.RequestActive(); // Applies only while this foreground app is alive.
     const auto start=Clock::now();auto last_save=start-std::chrono::seconds(10);
     std::uint64_t batches=0,attempts=0,submitted=0,accepted=0,rejected=0,reconnects=0;
     double work_units=0,gpu_seconds=0;bool sample_saved=false;std::string error;
