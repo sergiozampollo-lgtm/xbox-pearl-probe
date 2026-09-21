@@ -5,11 +5,13 @@ ByteAddressBuffer BT : register(t1);
 RWByteAddressBuffer Output : register(u0);
 cbuffer Shape : register(b0) { uint M; uint N; uint K; uint Rank; };
 
-// An odd row stride avoids the repeated 16-DWORD bank mapping when lanes
-// read BT by column. Padding changes storage only, not consensus arithmetic.
+// Stage 64 K elements at once: each lane loads four signed bytes with one
+// aligned load. This reduces workgroup barriers while retaining every rank
+// checkpoint. The odd LDS row stride avoids the repeated bank mapping.
 // https://gpuopen.com/learn/rdna-performance-guide/#compute-shaders
-groupshared int TileA[16][17];
-groupshared int TileBT[16][17];
+static const uint KTile = 64;
+groupshared int TileA[16][KTile+1];
+groupshared int TileBT[16][KTile+1];
 groupshared uint Reduction[256];
 groupshared uint Transcript[16];
 
@@ -26,19 +28,21 @@ void CSMain(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID,
     if (tid < 16) Transcript[tid] = 0;
     GroupMemoryBarrierWithGroupSync();
     int sum = 0;
-    for (uint base = 0; base < K; base += 16) {
-        // Every thread loads one element of each 16x16 tile. BT rows map to
-        // output columns; local.x is the reduction dimension for both loads.
-        uint ai = row * K + base + local.x;
-        uint bi = (group.x * 16 + local.y) * K + base + local.x;
-        TileA[local.y][local.x] = signed_byte(A.Load(ai & ~3u), ai);
-        TileBT[local.y][local.x] = signed_byte(BT.Load(bi & ~3u), bi);
+    for (uint base = 0; base < K; base += KTile) {
+        uint ai = row * K + base + local.x*4;
+        uint bi = (group.x * 16 + local.y) * K + base + local.x*4;
+        uint a4 = A.Load(ai);
+        uint b4 = BT.Load(bi);
+        [unroll] for (uint j = 0; j < 4; ++j) {
+            TileA[local.y][local.x*4+j] = signed_byte(a4,j);
+            TileBT[local.y][local.x*4+j] = signed_byte(b4,j);
+        }
         GroupMemoryBarrierWithGroupSync();
-        [unroll] for (uint d = 0; d < 16; ++d)
+        [unroll] for (uint d = 0; d < KTile; ++d)
             sum += TileA[local.y][d] * TileBT[local.x][d];
         GroupMemoryBarrierWithGroupSync();
 
-        if ((base + 16) % Rank == 0) {
+        if ((base + KTile) % Rank == 0) {
             Reduction[tid] = asuint(sum); // cumulative, NOT reset each rank
             GroupMemoryBarrierWithGroupSync();
             [unroll] for (uint stride = 128; stride > 0; stride >>= 1) {
@@ -46,7 +50,7 @@ void CSMain(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID,
                 GroupMemoryBarrierWithGroupSync();
             }
             if (tid == 0) {
-                uint slot = (((base+16) / Rank) - 1) & 15;
+                uint slot = (((base+KTile) / Rank) - 1) & 15;
                 uint old = Transcript[slot];
                 Transcript[slot] = ((old << 13) | (old >> 19)) ^ Reduction[0];
             }
