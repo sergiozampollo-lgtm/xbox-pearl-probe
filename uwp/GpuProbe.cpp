@@ -48,6 +48,13 @@ struct Gpu {
     Event event;
     UINT64 fence_value = 0;
     UINT64 timestamp_frequency = 0;
+    struct Buffers {
+        std::size_t a_bytes=0,b_bytes=0,out_bytes=0;
+        bool used=false;
+        ComPtr<ID3D12Resource> a_upload,b_upload,a,b,out,readback,timing;
+        ComPtr<ID3D12QueryHeap> queries;
+    };
+    std::unique_ptr<Buffers> cached;
 
     Gpu() {
         runtime = LoadLibraryExW(L"d3d12.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -159,21 +166,30 @@ struct Gpu {
             throw std::invalid_argument("GPU input size mismatch");
         const auto expected = compare_cpu ? pearl::reference_matmul(shape,input) : std::vector<std::uint32_t>{};
         const std::size_t output_bytes = shape.output_words()*sizeof(std::uint32_t);
-        auto a_upload = buffer(input.a.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
-        auto b_upload = buffer(input.bt.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
-        auto a = buffer(input.a.size(),D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
-        auto b = buffer(input.bt.size(),D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
-        auto out = buffer(output_bytes,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,true);
-        auto readback = buffer(output_bytes,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
-        auto timing = buffer(2*sizeof(UINT64),D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
-        D3D12_QUERY_HEAP_DESC query_desc{};
-        query_desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-        query_desc.Count = 2;
-        ComPtr<ID3D12QueryHeap> queries;
-        checked(device->CreateQueryHeap(&query_desc,IID_PPV_ARGS(&queries)), "CreateQueryHeap");
+        if(!cached || cached->a_bytes!=input.a.size() || cached->b_bytes!=input.bt.size() || cached->out_bytes!=output_bytes) {
+            // All prior work has completed before replacing a shape's resources.
+            cached=std::make_unique<Buffers>();
+            cached->a_bytes=input.a.size();cached->b_bytes=input.bt.size();cached->out_bytes=output_bytes;
+            cached->a_upload=buffer(input.a.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+            cached->b_upload=buffer(input.bt.size(),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+            cached->a=buffer(input.a.size(),D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
+            cached->b=buffer(input.bt.size(),D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);
+            cached->out=buffer(output_bytes,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,true);
+            cached->readback=buffer(output_bytes,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
+            cached->timing=buffer(2*sizeof(UINT64),D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
+            D3D12_QUERY_HEAP_DESC query_desc{};query_desc.Type=D3D12_QUERY_HEAP_TYPE_TIMESTAMP;query_desc.Count=2;
+            checked(device->CreateQueryHeap(&query_desc,IID_PPV_ARGS(&cached->queries)), "CreateQueryHeap");
+        }
+        const auto &a_upload=cached->a_upload,&b_upload=cached->b_upload,&a=cached->a,&b=cached->b;
+        const auto &out=cached->out,&readback=cached->readback,&timing=cached->timing;
+        const auto& queries=cached->queries;
         upload(a_upload.Get(),input.a.data(),input.a.size());
         upload(b_upload.Get(),input.bt.data(),input.bt.size());
         begin();
+        if(cached->used) {
+            transition(a.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
+            transition(b.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
+        }
         commands->CopyBufferRegion(a.Get(),0,a_upload.Get(),0,input.a.size());
         commands->CopyBufferRegion(b.Get(),0,b_upload.Get(),0,input.bt.size());
         transition(a.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -183,7 +199,7 @@ struct Gpu {
         JsonArray iterations;
         for (unsigned iteration=0; iteration<repeat; ++iteration) {
             begin();
-            if (iteration) transition(out.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            if (iteration || cached->used) transition(out.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             commands->SetComputeRootSignature(root.Get());
             const UINT constants[] = {shape.m,shape.n,shape.k,shape.rank};
             commands->SetComputeRoot32BitConstants(0,4,constants,0);
@@ -226,6 +242,7 @@ struct Gpu {
             iterations.Append(record);
         }
         JsonObject result;
+        cached->used=true;
         result.Insert(L"m",JsonValue::CreateNumberValue(shape.m));
         result.Insert(L"n",JsonValue::CreateNumberValue(shape.n));
         result.Insert(L"k",JsonValue::CreateNumberValue(shape.k));

@@ -24,8 +24,9 @@ namespace {
 void write_result(const JsonObject& result) {
     auto folder = ApplicationData::Current().LocalFolder();
     // Replace the last run in this probe's own LocalState only.
-    auto file = folder.CreateFileAsync(L"pearl-probe-result.json",CreationCollisionOption::ReplaceExisting).get();
+    auto file = folder.CreateFileAsync(L"pearl-probe-result.json.tmp",CreationCollisionOption::ReplaceExisting).get();
     FileIO::WriteTextAsync(file,result.Stringify()).get();
+    file.RenameAsync(L"pearl-probe-result.json",NameCollisionOption::ReplaceExisting).get();
 }
 
 struct ProbeView : implements<ProbeView,IFrameworkView> {

@@ -8,6 +8,7 @@
 #include <winrt/Windows.Security.Cryptography.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.System.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -31,8 +32,10 @@ namespace {
 void string_field(JsonObject& o,const wchar_t* k,const std::string& v) { o.Insert(k,JsonValue::CreateStringValue(to_hstring(v))); }
 void number_field(JsonObject& o,const wchar_t* k,double v) { o.Insert(k,JsonValue::CreateNumberValue(v)); }
 void save_text(const wchar_t* name,const JsonObject& o) {
-    auto f=ApplicationData::Current().LocalFolder().CreateFileAsync(name,CreationCollisionOption::ReplaceExisting).get();
+    auto folder=ApplicationData::Current().LocalFolder();
+    auto f=folder.CreateFileAsync(hstring(name)+L".tmp",CreationCollisionOption::ReplaceExisting).get();
     FileIO::WriteTextAsync(f,o.Stringify()).get();
+    f.RenameAsync(name,NameCollisionOption::ReplaceExisting).get();
 }
 template<class T> void save_bytes(const wchar_t* name,const T& b) {
     auto f=ApplicationData::Current().LocalFolder().CreateFileAsync(name,CreationCollisionOption::ReplaceExisting).get();
@@ -193,6 +196,8 @@ JsonObject run_mining_session(const JsonObject& config) {
         status.Insert(L"authorized",JsonValue::CreateBooleanValue(auth));
         status.Insert(L"pool_target_interpretation_confirmed_by_acceptance",JsonValue::CreateBooleanValue(accepted+a>0));
         number_field(status,L"elapsed_seconds",elapsed);number_field(status,L"batches",static_cast<double>(batches));
+        number_field(status,L"app_memory_bytes",static_cast<double>(winrt::Windows::System::MemoryManager::AppMemoryUsage()));
+        number_field(status,L"app_memory_limit_bytes",static_cast<double>(winrt::Windows::System::MemoryManager::AppMemoryUsageLimit()));
         number_field(status,L"tile_attempts",static_cast<double>(attempts));number_field(status,L"work_units",work_units);
         number_field(status,L"work_units_per_second",elapsed>0?work_units/elapsed:0);
         number_field(status,L"gpu_seconds",gpu_seconds);number_field(status,L"shares_submitted",static_cast<double>(submitted+s));
