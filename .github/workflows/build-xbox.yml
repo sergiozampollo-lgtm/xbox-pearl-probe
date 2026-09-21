@@ -23,5 +23,6 @@ jobs:
             out/PearlProbe.msix
             out/pearl-probe.cer
             out/SHA256SUMS.txt
+            out/shader-*.asm
           if-no-files-found: error
           retention-days: 1

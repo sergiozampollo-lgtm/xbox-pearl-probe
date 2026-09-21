@@ -189,6 +189,8 @@ JsonObject run_mining_session(const JsonObject& config) {
     const pearl::Shape shape{static_cast<std::uint32_t>(config.GetNamedNumber(L"m",256)),
         static_cast<std::uint32_t>(config.GetNamedNumber(L"n",256)),static_cast<std::uint32_t>(config.GetNamedNumber(L"k",4096))};
     shape.validate_probe();(void)pearl::mining_config(shape);
+    const auto gpu_kernel=to_string(config.GetNamedString(L"gpu_kernel",L"fxc_scalar"));
+    select_gpu_kernel(gpu_kernel);
     const bool continuous=config.GetNamedBoolean(L"continuous",false);
     const auto worker_count=config.GetNamedNumber(L"preparation_workers",3);
     if(!std::isfinite(worker_count) || worker_count<1 || worker_count>6 || worker_count!=std::floor(worker_count))
@@ -218,6 +220,7 @@ JsonObject run_mining_session(const JsonObject& config) {
         number_field(status,L"run_seconds",duration);
         number_field(status,L"m",shape.m);number_field(status,L"n",shape.n);number_field(status,L"k",shape.k);
         number_field(status,L"preparation_workers",workers);
+        string_field(status,L"gpu_kernel",gpu_kernel);
         status.Insert(L"authorized",JsonValue::CreateBooleanValue(auth));
         status.Insert(L"pool_target_interpretation_confirmed_by_acceptance",JsonValue::CreateBooleanValue(accepted+a>0));
         number_field(status,L"elapsed_seconds",elapsed);number_field(status,L"batches",static_cast<double>(batches));

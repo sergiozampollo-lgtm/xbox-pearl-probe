@@ -14,7 +14,7 @@ demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
 - Referência de CPU para multiplicação exata de inteiros com sinal, redução XOR
   cumulativa a cada 128 termos e acumulação de 16 palavras com rotação de 13 bits.
 - Shader HLSL equivalente, com entradas de 8 bits empacotadas e acumulador de
-  32 bits; compilação antecipada para `cs_5_1`.
+  32 bits; baseline FXC `cs_5_1` e variantes experimentais DXC `cs_6_4`.
 - Aplicativo UWP x64 separado do xllama, com apenas a capacidade `internetClient`.
 - Sessão TLS com autorização, tarefas V3, descarte de trabalho antigo e contagem
   de shares baseada nas respostas do pool. O Mac não executa mineração.
@@ -102,6 +102,18 @@ Para operação contínua, definir explicitamente `continuous: true` e
 `run_seconds: 0`; nessa modalidade não há encerramento automático por tempo.
 Sem `continuous`, a duração padrão continua sendo 120 segundos.
 `preparation_workers` controla a preparação CPU (1 a 6; padrão 3).
+`gpu_kernel` seleciona explicitamente `fxc_scalar` (padrão), `dxc_scalar`,
+`dxc_packed_scalar`, `dxc_dot4`, `dxc_wave` ou `dxc_dot4_wave`. As variantes
+DXC exigem confirmação de Shader Model 6.4; as de wave também exigem WaveOps.
+Falha de suporte ou de criação do pipeline gera erro, sem substituição silenciosa.
+No diagnóstico offline, cada variante disponível passa por comparação completa
+CPU/GPU, incluindo bytes negativos e K=16384, e comparação de saída compacta.
+Depois mede cinco amostras GPU após aquecimento, com entradas idênticas em
+2048×2048×4096. A variante packed-scalar usa o mesmo layout do dot4, permitindo
+separar o efeito do layout daquele da instrução. A redução wave usa uma operação
+XOR atômica por wave, sem depender de uma correspondência entre threads e lanes.
+Esses testes sintéticos não medem trabalho aceito pelo pool; a seleção para
+mineração depende de comparação posterior de desempenho e validação de prova real.
 M e N aceitam múltiplos de 16 até 2048; cada envio à GPU está limitado a
 2^34 unidades de trabalho. Aumentar dimensões ou threads exige medir o ganho
 e conferir as provas; esses parâmetros não alteram a frequência do hardware.

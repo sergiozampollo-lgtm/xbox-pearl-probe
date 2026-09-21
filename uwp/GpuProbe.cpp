@@ -2,6 +2,11 @@
 #include "pearl_core.h"
 #include <Windows.h>
 #include "matmul_shader.h"
+#include "matmul_dxc_scalar.h"
+#include "matmul_dxc_packed_scalar.h"
+#include "matmul_dxc_dot4.h"
+#include "matmul_dxc_wave.h"
+#include "matmul_dxc_dot4_wave.h"
 #include <winrt/Windows.Foundation.Collections.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -14,10 +19,31 @@
 #include <stdexcept>
 #include <vector>
 #include <memory>
+#include <map>
 
 using Microsoft::WRL::ComPtr;
 using namespace winrt::Windows::Data::Json;
 namespace {
+struct Kernel {
+    const char* name;
+    const void* bytes;
+    std::size_t size;
+    bool sm64, wave;
+};
+const Kernel kernels[] = {
+    {"fxc_scalar",g_matmul_shader,sizeof(g_matmul_shader),false,false},
+    {"dxc_scalar",g_matmul_dxc_scalar,sizeof(g_matmul_dxc_scalar),true,false},
+    {"dxc_packed_scalar",g_matmul_dxc_packed_scalar,sizeof(g_matmul_dxc_packed_scalar),true,false},
+    {"dxc_dot4",g_matmul_dxc_dot4,sizeof(g_matmul_dxc_dot4),true,false},
+    {"dxc_wave",g_matmul_dxc_wave,sizeof(g_matmul_dxc_wave),true,true},
+    {"dxc_dot4_wave",g_matmul_dxc_dot4_wave,sizeof(g_matmul_dxc_dot4_wave),true,true}
+};
+const Kernel& find_kernel(const std::string& name) {
+    for(const auto& kernel:kernels)if(name==kernel.name)return kernel;
+    throw std::invalid_argument("unknown GPU kernel: "+name);
+}
+thread_local std::string selected_kernel="fxc_scalar";
+
 void checked(HRESULT hr, const char* operation) {
     if (FAILED(hr)) {
         std::ostringstream s;
@@ -45,6 +71,11 @@ struct Gpu {
     ComPtr<ID3D12Fence> fence;
     ComPtr<ID3D12RootSignature> root;
     ComPtr<ID3D12PipelineState> pipeline;
+    std::map<std::string,ComPtr<ID3D12PipelineState>> pipelines;
+    std::string kernel_name;
+    D3D12_FEATURE_DATA_SHADER_MODEL shader_model{D3D_SHADER_MODEL_6_4};
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 wave_options{};
+    bool shader_model_queried=false,wave_options_queried=false;
     Event event;
     UINT64 fence_value = 0;
     UINT64 timestamp_frequency = 0;
@@ -78,6 +109,8 @@ struct Gpu {
             }
         }
         if (!device) throw std::runtime_error("No hardware D3D12 adapter; refusing CPU fallback");
+        shader_model_queried=SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,&shader_model,sizeof(shader_model)));
+        wave_options_queried=SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1,&wave_options,sizeof(wave_options)));
         D3D12_COMMAND_QUEUE_DESC queue_desc{};
         queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         checked(device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)), "CreateCommandQueue");
@@ -104,10 +137,38 @@ struct Gpu {
         ComPtr<ID3DBlob> blob, errors;
         checked(serialize(&root_desc,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&errors), "SerializeRootSignature");
         checked(device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root)), "CreateRootSignature");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
-        desc.pRootSignature = root.Get();
-        desc.CS = {g_matmul_shader, sizeof(g_matmul_shader)};
-        checked(device->CreateComputePipelineState(&desc,IID_PPV_ARGS(&pipeline)), "CreateComputePipelineState");
+        select("fxc_scalar");
+    }
+
+    void select(const std::string& name) {
+        const auto& kernel=find_kernel(name);
+        if(kernel.sm64 && (!shader_model_queried || shader_model.HighestShaderModel<D3D_SHADER_MODEL_6_4))
+            throw std::runtime_error("device did not confirm Shader Model 6.4 for "+name);
+        if(kernel.wave && (!wave_options_queried || !wave_options.WaveOps))
+            throw std::runtime_error("device did not confirm wave operations for "+name);
+        auto found=pipelines.find(name);
+        if(found==pipelines.end()) {
+            D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
+            desc.pRootSignature=root.Get();desc.CS={kernel.bytes,kernel.size};
+            ComPtr<ID3D12PipelineState> compiled;
+            checked(device->CreateComputePipelineState(&desc,IID_PPV_ARGS(&compiled)), "CreateComputePipelineState");
+            found=pipelines.emplace(name,std::move(compiled)).first;
+        }
+        pipeline=found->second;kernel_name=name;
+    }
+
+    JsonObject capabilities() const {
+        JsonObject result;
+        result.Insert(L"shader_model_query_succeeded",JsonValue::CreateBooleanValue(shader_model_queried));
+        if(shader_model_queried)
+            result.Insert(L"shader_model_under_6_4_request",JsonValue::CreateNumberValue(shader_model.HighestShaderModel));
+        result.Insert(L"wave_options_query_succeeded",JsonValue::CreateBooleanValue(wave_options_queried));
+        if(wave_options_queried) {
+            result.Insert(L"wave_ops",JsonValue::CreateBooleanValue(wave_options.WaveOps!=FALSE));
+            result.Insert(L"wave_lanes_min",JsonValue::CreateNumberValue(wave_options.WaveLaneCountMin));
+            result.Insert(L"wave_lanes_max",JsonValue::CreateNumberValue(wave_options.WaveLaneCountMax));
+        }
+        return result;
     }
 
     ComPtr<ID3D12Resource> buffer(UINT64 bytes, D3D12_HEAP_TYPE heap,
@@ -247,6 +308,7 @@ struct Gpu {
         }
         JsonObject result;
         cached->used=true;
+        result.Insert(L"gpu_kernel",JsonValue::CreateStringValue(winrt::to_hstring(kernel_name)));
         result.Insert(L"m",JsonValue::CreateNumberValue(shape.m));
         result.Insert(L"n",JsonValue::CreateNumberValue(shape.n));
         result.Insert(L"k",JsonValue::CreateNumberValue(shape.k));
@@ -283,8 +345,70 @@ JsonObject run_gpu_probe() {
 GpuWorkResult run_gpu_work(const pearl::Shape& shape,const pearl::Matrices& input,bool compare_cpu) {
     static thread_local std::unique_ptr<Gpu> gpu;
     if(!gpu)gpu=std::make_unique<Gpu>();
+    gpu->select(selected_kernel);
     GpuWorkResult result;
     result.measurements=gpu->run(shape,input,result.output,compare_cpu);
     result.measurements.Insert(L"software_adapter",JsonValue::CreateBooleanValue(false));
+    return result;
+}
+
+void select_gpu_kernel(const std::string& name) {
+    find_kernel(name); // Explicit selection only; never silently substitute kernels.
+    selected_kernel=name;
+}
+
+JsonObject run_gpu_variant_probe(const std::function<void(const std::string&)>& progress) {
+    Gpu gpu;
+    JsonObject result;
+    result.Insert(L"capabilities",gpu.capabilities());
+    result.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(false));
+    const pearl::Shape benchmark_shape{2048,2048,4096};
+    const auto benchmark_input=pearl::probe_matrices(benchmark_shape,0x5a17);
+    std::vector<std::uint32_t> baseline,output;
+    JsonArray variants;
+    for(const auto& kernel:kernels) {
+        progress(kernel.name);
+        JsonObject variant;
+        variant.Insert(L"gpu_kernel",JsonValue::CreateStringValue(winrt::to_hstring(kernel.name)));
+        try { gpu.select(kernel.name); }
+        catch(const std::exception& e) {
+            variant.Insert(L"available",JsonValue::CreateBooleanValue(false));
+            variant.Insert(L"error",JsonValue::CreateStringValue(winrt::to_hstring(e.what())));
+            variants.Append(variant);continue;
+        }
+        variant.Insert(L"available",JsonValue::CreateBooleanValue(true));
+        JsonArray correctness;
+        const pearl::Shape checks[]={{16,32,2048},{32,48,4096},{16,16,16384}};
+        for(const auto& shape:checks) {
+            const auto input=pearl::probe_matrices(shape,0x91a+shape.k);
+            correctness.Append(gpu.run(shape,input,output,true));
+            // Check production's compact output too, against every CPU transcript.
+            const auto full=output;
+            gpu.run(shape,input,output,false);
+            if(!std::equal(output.begin(),output.end(),full.begin()+shape.cells()))
+                throw std::runtime_error(std::string(kernel.name)+": compact transcript mismatch");
+        }
+        variant.Insert(L"correctness",correctness);
+        variant.Insert(L"compact_matches_full_cpu_output",JsonValue::CreateBooleanValue(true));
+        JsonArray timings;
+        // Same inputs, dimensions, and compact output for all kernels. The first
+        // dispatch warms resources; only the next five are timing samples.
+        for(unsigned iteration=0;iteration<6;++iteration) {
+            auto timing=gpu.run(benchmark_shape,benchmark_input,output,false);
+            if(baseline.empty())baseline=output;
+            if(output!=baseline)
+                throw std::runtime_error(std::string(kernel.name)+": large transcript mismatch against baseline");
+            auto record=timing.GetNamedArray(L"iterations").GetObjectAt(0);
+            record.Insert(L"warmup",JsonValue::CreateBooleanValue(iteration==0));
+            record.Insert(L"matches_baseline",JsonValue::CreateBooleanValue(true));
+            timings.Append(record);
+        }
+        variant.Insert(L"m",JsonValue::CreateNumberValue(benchmark_shape.m));
+        variant.Insert(L"n",JsonValue::CreateNumberValue(benchmark_shape.n));
+        variant.Insert(L"k",JsonValue::CreateNumberValue(benchmark_shape.k));
+        variant.Insert(L"benchmark_iterations",timings);
+        variants.Append(variant);
+    }
+    result.Insert(L"variants",variants);
     return result;
 }

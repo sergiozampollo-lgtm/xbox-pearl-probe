@@ -71,6 +71,12 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                     result.Insert(L"shares_submitted",mining.GetNamedValue(L"shares_submitted"));
                     result.Insert(L"status",JsonValue::CreateStringValue(mining.GetNamedString(L"stage")==L"completed_bounded_run"?L"completed":L"failed"));
                 } else {
+                    result.Insert(L"stage",JsonValue::CreateStringValue(L"gpu_kernel_comparison"));
+                    write_result(result);
+                    result.Insert(L"gpu_variants",run_gpu_variant_probe([&](const std::string& name) {
+                        result.Insert(L"stage",JsonValue::CreateStringValue(to_hstring("gpu_kernel_"+name)));
+                        write_result(result);
+                    }));
                     result.Insert(L"stage",JsonValue::CreateStringValue(L"complete_v3_gpu_proofs"));
                     write_result(result);
                     result.Insert(L"proofs",run_proof_probe());

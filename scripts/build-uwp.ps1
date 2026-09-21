@@ -8,7 +8,7 @@ $Sdk = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.22621.0\x64"
 $VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $MsBuild = & $VsWhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
 if (-not $MsBuild) { throw 'Visual Studio 2022 / MSBuild not found' }
-foreach ($name in @('fxc.exe','makeappx.exe','signtool.exe')) {
+foreach ($name in @('fxc.exe','dxc.exe','makeappx.exe','signtool.exe')) {
     if (-not (Test-Path "$Sdk\$name")) { throw "Windows SDK tool missing: $name" }
 }
 $Output = Join-Path $Root 'out'
@@ -24,6 +24,24 @@ New-Item -ItemType Directory -Force $Output,$Generated | Out-Null
 & "$Sdk\fxc.exe" /nologo /T cs_5_1 /E CSMain /O3 /Ges /WX `
     /Fh "$Generated\matmul_shader.h" /Vn g_matmul_shader `
     "$Root\shaders\matmul_transcript.hlsl"
+# Keep compiler, packed layout, dot-product, and wave effects distinguishable.
+# cs_6_4 selects the older DXIL contract accepted by the documented Xbox UWP
+# feature envelope; capability and pipeline creation are also checked on Xbox.
+$Variants = @(
+    @{ Name='dxc_scalar'; Packed=0; Dot4=0; Wave=0 },
+    @{ Name='dxc_packed_scalar'; Packed=1; Dot4=0; Wave=0 },
+    @{ Name='dxc_dot4'; Packed=1; Dot4=1; Wave=0 },
+    @{ Name='dxc_wave'; Packed=0; Dot4=0; Wave=1 },
+    @{ Name='dxc_dot4_wave'; Packed=1; Dot4=1; Wave=1 }
+)
+foreach ($Variant in $Variants) {
+    $Name = $Variant.Name
+    & "$Sdk\dxc.exe" -T cs_6_4 -E CSMain -O3 -Ges -WX -HV 2018 `
+        -validator-version 1.4 `
+        -D "PEARL_PACKED=$($Variant.Packed)" -D "PEARL_DOT4=$($Variant.Dot4)" -D "PEARL_WAVE=$($Variant.Wave)" `
+        -Fh "$Generated\matmul_$Name.h" -Vn "g_matmul_$Name" `
+        -Fc "$Output\shader-$Name.asm" "$Root\shaders\matmul_transcript.hlsl"
+}
 & nuget restore "$Root\uwp\packages.config" -PackagesDirectory "$Root\uwp\packages" -NonInteractive
 
 [xml]$Manifest = Get-Content "$Root\uwp\AppxManifest.xml"
