@@ -104,6 +104,15 @@ Para operação contínua, definir explicitamente `continuous: true` e
 `run_seconds: 0`; nessa modalidade não há encerramento automático por tempo.
 Sem `continuous`, a duração padrão continua sendo 120 segundos.
 `preparation_workers` controla a preparação CPU (1 a 6; padrão 3).
+`receive_idle_seconds` (45 a 3600; padrão 600) é o silêncio máximo do pool antes
+de reconectar — o pool não envia keepalive entre jobs, então um socket calado
+não é erro; `job_max_age_seconds` (60 a 3600; padrão 900) é a validade local de
+um job que ainda não foi substituído. Toda mensagem do pool é registrada em
+`pearl-pool-log.jsonl` (método, id, resultado, bytes, intervalo; sem dados de
+conta). A varredura das transcrições usa `blake3_hash_many` (uma chamada SIMD
+por 64 tiles) e as árvores Merkle são construídas em lotes de folhas/pais com
+`blake3_hash_many`; a conferência da raiz contra o hasher oficial passa a ser
+amostrada (primeira preparação de cada job e uma em 256), além dos testes.
 `gpu_kernel` seleciona explicitamente `fxc_scalar` (padrão), `dxc_scalar`,
 `dxc_packed_scalar`, `dxc_dot4`, `dxc_wave` ou `dxc_dot4_wave`. As variantes
 DXC exigem confirmação de Shader Model 6.4; as de wave também exigem WaveOps.

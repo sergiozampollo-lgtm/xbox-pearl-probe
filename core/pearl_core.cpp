@@ -45,6 +45,9 @@ namespace {
 void store_le(std::uint8_t* dest, std::uint32_t v) {
     for (unsigned i = 0; i < 4; ++i) dest[i] = static_cast<std::uint8_t>(v >> (8*i));
 }
+std::uint32_t load32(const std::uint8_t* p) {
+    return std::uint32_t(p[0]) | (std::uint32_t(p[1]) << 8) | (std::uint32_t(p[2]) << 16) | (std::uint32_t(p[3]) << 24);
+}
 Hash bind_root(const Hash& root, std::uint32_t dim, const Hash& salt) {
     std::array<std::uint8_t, 64> message{};
     std::copy(root.begin(), root.end(), message.begin());
@@ -76,6 +79,27 @@ Hash jackpot_hash(const Transcript& transcript, const Hash& a_seed) {
     for (std::size_t i = 0; i < transcript.size(); ++i)
         store_le(bytes.data() + 4*i, transcript[i]);
     return digest(bytes.data(), bytes.size(), &a_seed);
+}
+
+void jackpot_hash_many(const std::uint32_t* transcripts, std::size_t tiles,
+                       const Hash& a_seed, Hash* out) {
+    std::uint32_t key_words[8];
+    for (unsigned i = 0; i < 8; ++i) key_words[i] = load32(a_seed.data() + 4*i);
+    // Each message is exactly one 64-byte block == one chunk: CHUNK_START|CHUNK_END|ROOT
+    // with counter 0 yields the first 32 output bytes, i.e. the BLAKE3 keyed digest.
+    constexpr std::size_t batch = 64;
+    std::array<std::uint8_t, 64> staged[batch];
+    const std::uint8_t* inputs[batch];
+    for (std::size_t first = 0; first < tiles; first += batch) {
+        const std::size_t count = std::min(batch, tiles - first);
+        for (std::size_t j = 0; j < count; ++j) {
+            // Serialize explicitly (store_le) so the result does not depend on host endianness.
+            for (unsigned w = 0; w < 16; ++w) store_le(staged[j].data() + 4*w, transcripts[(first+j)*16 + w]);
+            inputs[j] = staged[j].data();
+        }
+        blake3_hash_many(inputs, count, 1, key_words, 0, false, KEYED_HASH,
+                         CHUNK_START, CHUNK_END | ROOT, out[first].data());
+    }
 }
 
 void Shape::validate_probe() const {

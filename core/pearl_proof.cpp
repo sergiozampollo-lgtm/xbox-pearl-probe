@@ -108,18 +108,52 @@ Hash compute_job_key(const Header& header,const Shape& shape) {
     return digest(data.data(),data.size());
 }
 
-MatrixTree::MatrixTree(const std::vector<std::int8_t>& raw,const Hash& key) : data_(raw.begin(),raw.end()) {
-    if(data_.size()<2048 || data_.size()%1024)throw std::invalid_argument("tree requires at least two complete chunks");
-    std::vector<Hash> leaves(data_.size()/1024);
-    for(std::size_t i=0;i<leaves.size();++i)leaves[i]=compress(key,data_.data()+i*1024,i,false,false);
-    layers_.push_back(std::move(leaves));
-    while(layers_.back().size()>1) {
-        const auto& last=layers_.back();std::vector<Hash> next;
-        for(std::size_t i=0;i<last.size();i+=2)
-            next.push_back(i+1==last.size()?last[i]:parent_cv(key,last[i],last[i+1],last.size()==2));
-        layers_.push_back(std::move(next));
+namespace {
+void key_words(const Hash& key, std::uint32_t out[8]) { for(unsigned i=0;i<8;++i) out[i]=read32(key.data()+4*i); }
+constexpr std::size_t hash_batch = 64; // any multiple of the SIMD degree; hash_many loops internally
+}
+void MatrixTree::hash_leaves(std::size_t first,std::size_t count) {
+    std::uint32_t kw[8];key_words(key_,kw);const std::uint8_t* inputs[hash_batch];
+    for(std::size_t i=first;i<first+count;i+=hash_batch) {
+        const std::size_t n=std::min(hash_batch,first+count-i);
+        for(std::size_t j=0;j<n;++j)inputs[j]=data_.data()+(i+j)*1024;
+        // 16 blocks per chunk; counter = chunk index, incremented per input; never ROOT here.
+        blake3_hash_many(inputs,n,16,kw,i,true,KEYED_HASH,CHUNK_START,CHUNK_END,layers_[0][i].data());
     }
-    if(root()!=digest(data_.data(),data_.size(),&key))throw std::runtime_error("Merkle root disagrees with official BLAKE3 digest");
+}
+void MatrixTree::hash_parents(std::size_t layer,std::size_t first_pair,std::size_t pairs) {
+    const auto& below=layers_[layer];auto& above=layers_[layer+1];
+    if(below.size()==2) { above[0]=parent_cv(key_,below[0],below[1],true); return; } // ROOT only at the top
+    std::uint32_t kw[8];key_words(key_,kw);const std::uint8_t* inputs[hash_batch];
+    for(std::size_t i=first_pair;i<first_pair+pairs;i+=hash_batch) {
+        const std::size_t n=std::min(hash_batch,first_pair+pairs-i);
+        for(std::size_t j=0;j<n;++j)inputs[j]=below[2*(i+j)].data(); // (2i,2i+1) is one contiguous 64-byte block
+        blake3_hash_many(inputs,n,1,kw,0,false,KEYED_HASH|PARENT,0,0,above[i].data());
+    }
+}
+MatrixTree::MatrixTree(const std::vector<std::int8_t>& raw,const Hash& key) : key_(key),data_(raw.begin(),raw.end()) {
+    if(data_.size()<2048 || data_.size()%1024)throw std::invalid_argument("tree requires at least two complete chunks");
+    layers_.emplace_back(data_.size()/1024);
+    hash_leaves(0,layers_[0].size());
+    while(layers_.back().size()>1) {
+        const std::size_t size=layers_.back().size(),pairs=size/2;
+        layers_.emplace_back(pairs+(size&1));
+        const std::size_t layer=layers_.size()-2;
+        hash_parents(layer,0,pairs);
+        if(size&1)layers_[layer+1][pairs]=layers_[layer][size-1]; // odd node carried up unhashed (BLAKE3 tree shape)
+    }
+}
+bool MatrixTree::verify_root() const { return root()==digest(data_.data(),data_.size(),&key_); }
+void MatrixTree::update_chunk(std::size_t index,const std::int8_t* chunk) {
+    if(index>=chunks())throw std::invalid_argument("chunk index out of range");
+    std::memcpy(data_.data()+index*1024,chunk,1024);
+    hash_leaves(index,1);
+    std::size_t node=index;
+    for(std::size_t layer=0;layer+1<layers_.size();++layer) {
+        const auto& below=layers_[layer];const std::size_t pair=node/2;
+        if(2*pair+1<below.size())hash_parents(layer,pair,1);else layers_[layer+1][pair]=below[2*pair];
+        node=pair;
+    }
 }
 Bytes MatrixTree::open_rows(std::uint32_t first,std::uint32_t k) const {
     if(k%1024 || (std::uint64_t(first)+16)*k>data_.size())throw std::invalid_argument("row opening out of bounds");
@@ -146,10 +180,13 @@ Bytes MatrixTree::open_rows(std::uint32_t first,std::uint32_t k) const {
     u64(out,16);for(std::uint32_t row=first;row<first+16;++row)u64(out,row);
     return out;
 }
-DenseWork::DenseWork(const Header& h,const Shape& s,const Hash& entropy)
+DenseWork::DenseWork(const Header& h,const Shape& s,const Hash& entropy,bool verify_roots)
  : shape(s),job_key(compute_job_key(h,s)),raw(signals(s,entropy)),a_tree(raw.a,job_key),b_tree(raw.bt,job_key),
    seeds(seeds_v3(job_key,a_tree.root(),b_tree.root(),s.m,s.n)),
-   noised{add_noise(raw.a,s.m,s.k,seeds.a,'A'),add_noise(raw.bt,s.n,s.k,seeds.b,'B')} {}
+   noised{add_noise(raw.a,s.m,s.k,seeds.a,'A'),add_noise(raw.bt,s.n,s.k,seeds.b,'B')} {
+    if(verify_roots && (!a_tree.verify_root() || !b_tree.verify_root()))
+        throw std::runtime_error("Merkle root disagrees with official BLAKE3 digest");
+}
 Bytes DenseWork::proof(std::uint32_t ty,std::uint32_t tx) const {
     if(ty>=shape.m/16 || tx>=shape.n/16)throw std::invalid_argument("tile out of bounds");
     Bytes out;u64(out,shape.m);u64(out,shape.n);u64(out,shape.k);u64(out,shape.rank);

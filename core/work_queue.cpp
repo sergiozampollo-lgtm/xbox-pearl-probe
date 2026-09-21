@@ -16,15 +16,17 @@ void WorkQueue::stop() {
     for(auto& thread:threads_)if(thread.joinable())thread.join();
 }
 WorkQueue::~WorkQueue() { stop(); }
-void WorkQueue::set_job(const Header& header,std::uint64_t generation,const Hash& seed) {
+std::size_t WorkQueue::set_job(const Header& header,std::uint64_t generation,const Hash& seed) {
     if(!generation)throw std::invalid_argument("job generation must be nonzero");
+    std::size_t discarded;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if(has_job_ && generation<=generation_)throw std::invalid_argument("job generations must increase");
-        header_=header;generation_=generation;seed_=seed;has_job_=true;
-        ready_.clear(); // Completed work from the previous task cannot escape.
+        header_=header;generation_=generation;seed_=seed;counter_=0;has_job_=true;
+        discarded=ready_.size();ready_.clear(); // Completed work from the previous task cannot escape.
     }
     changed_.notify_all();
+    return discarded;
 }
 std::unique_ptr<PreparedWork> WorkQueue::take_for(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -52,7 +54,11 @@ void WorkQueue::produce() {
                 message[i+8]=static_cast<std::uint8_t>(counter>>(i*8));
             }
             const auto entropy=digest(message.data(),message.size(),&seed);
-            auto work=std::make_unique<DenseWork>(header,shape_,entropy);
+            // Sampled integrity check: the first preparation of every job and one in every
+            // 256 afterwards also recompute both roots with the official hasher (~10% of a
+            // preparation); the tree construction is exact regardless of this check.
+            const bool verify_roots=(counter%256)==1;
+            auto work=std::make_unique<DenseWork>(header,shape_,entropy,verify_roots);
             const auto seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
             auto result=std::make_unique<PreparedWork>(PreparedWork{generation,entropy,seconds,std::move(work)});
             {

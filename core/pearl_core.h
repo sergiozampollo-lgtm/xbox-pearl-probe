@@ -18,6 +18,11 @@ struct Seeds { Hash a; Hash b; };
 Seeds seeds_v3(const Hash& job_key, const Hash& root_a, const Hash& root_b,
                std::uint32_t m, std::uint32_t n);
 Hash jackpot_hash(const Transcript& transcript, const Hash& a_seed);
+// Batched equivalent of jackpot_hash for `tiles` consecutive 16-word transcripts
+// laid out as little-endian uint32 (the compact GPU readback). out[i] equals
+// jackpot_hash(transcript i, a_seed) bit for bit; uses blake3_hash_many (SIMD).
+void jackpot_hash_many(const std::uint32_t* transcripts, std::size_t tiles,
+                       const Hash& a_seed, Hash* out);
 std::size_t cpu_blake3_simd_degree();
 
 // Deliberately a fixed diagnostic subset, not a full consensus validator.

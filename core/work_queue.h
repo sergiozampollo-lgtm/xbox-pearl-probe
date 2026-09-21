@@ -24,7 +24,8 @@ public:
     ~WorkQueue();
     WorkQueue(const WorkQueue&)=delete;
     WorkQueue& operator=(const WorkQueue&)=delete;
-    void set_job(const Header&, std::uint64_t generation, const Hash& entropy_seed);
+    // Returns how many already-prepared items of the previous job were discarded.
+    std::size_t set_job(const Header&, std::uint64_t generation, const Hash& entropy_seed);
     std::unique_ptr<PreparedWork> take_for(std::chrono::milliseconds);
 private:
     void produce();

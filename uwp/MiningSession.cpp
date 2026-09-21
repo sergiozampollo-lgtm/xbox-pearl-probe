@@ -13,6 +13,7 @@
 #include <winrt/Windows.System.h>
 #include <algorithm>
 #include <atomic>
+#include <fstream>
 #include <chrono>
 #include <cmath>
 #include <mutex>
@@ -58,6 +59,14 @@ struct Job {
     std::uint64_t sequence=0;
 };
 struct Pool {
+    // Connection policy (private config, with defaults). The pool sends nothing between
+    // jobs; a silent socket is NOT an error until receive_idle_limit, and a job stays
+    // valid until replaced or job_max_age (pool "stale" replies calibrate this).
+    std::chrono::seconds receive_idle_limit{600};
+    std::chrono::seconds job_max_age{900};
+    Clock::time_point last_message=Clock::now();
+    std::uint64_t messages=0,notifies=0,unknown_methods=0;
+    std::ofstream log; // pearl-pool-log.jsonl in LocalState: method/id/result/bytes/dt only, no account data
     StreamSocket socket;
     DataReader reader{nullptr};
     DataWriter writer{nullptr};
@@ -71,6 +80,14 @@ struct Pool {
     unsigned next_id=2;
     std::uint64_t sequence=0,submitted=0,accepted=0,rejected=0;
 
+    void log_line(const std::string& kind,double id,const std::string& detail,std::size_t bytes) {
+        if(!log.is_open())return;
+        const auto now=Clock::now();
+        log<<"{\"t\":"<<std::chrono::duration<double>(now.time_since_epoch()).count()
+           <<",\"dt\":"<<std::chrono::duration<double>(now-last_message).count()
+           <<",\"kind\":\""<<kind<<"\",\"id\":"<<id<<",\"bytes\":"<<bytes<<",\"detail\":\""<<detail<<"\"}\n";
+        log.flush();
+    }
     void send(const JsonObject& request) {
         writer.WriteString(request.Stringify()+L"\n");
         auto op=writer.StoreAsync();
@@ -87,12 +104,21 @@ struct Pool {
             throw std::runtime_error("configured host is outside the selected Kryptex pool");
         const auto port=config.GetNamedNumber(L"port");
         if(port!=8048)throw std::runtime_error("only the verified PRL TLS port is enabled");
+        const auto idle=config.GetNamedNumber(L"receive_idle_seconds",600);
+        const auto age=config.GetNamedNumber(L"job_max_age_seconds",900);
+        if(!std::isfinite(idle)||idle<45||idle>3600||!std::isfinite(age)||age<60||age>3600)
+            throw std::runtime_error("receive_idle_seconds must be 45..3600 and job_max_age_seconds 60..3600");
+        receive_idle_limit=std::chrono::seconds(static_cast<long long>(idle));
+        job_max_age=std::chrono::seconds(static_cast<long long>(age));
+        log.open(to_string(ApplicationData::Current().LocalFolder().Path())+"\\pearl-pool-log.jsonl",std::ios::app);
         socket.Control().KeepAlive(true);
         auto connect=socket.ConnectAsync(HostName(host),L"8048",SocketProtectionLevel::Tls12);
         if(connect.wait_for(std::chrono::seconds(20))==winrt::Windows::Foundation::AsyncStatus::Started) {
             connect.Cancel();throw std::runtime_error("pool connect timeout");
         }
         connect.get(); // Default system certificate/hostname verification; no exceptions.
+        last_message=Clock::now();
+        log_line("connected",0,"",0);
         reader=DataReader(socket.InputStream());reader.InputStreamOptions(InputStreamOptions::Partial);
         writer=DataWriter(socket.OutputStream());writer.UnicodeEncoding(UnicodeEncoding::Utf8);
         JsonObject params,request;
@@ -115,8 +141,12 @@ struct Pool {
             std::string buffer;
             while(!dead) {
                 auto op=reader.LoadAsync(4096);
-                if(op.wait_for(std::chrono::seconds(45))==winrt::Windows::Foundation::AsyncStatus::Started) {
-                    op.Cancel();throw std::runtime_error("pool receive timeout");
+                // Silence is not failure: keep waiting on the same pending read until the idle
+                // limit; TCP keepalive (enabled above) still surfaces a dead peer as an error.
+                while(op.wait_for(std::chrono::seconds(45))==winrt::Windows::Foundation::AsyncStatus::Started) {
+                    if(dead || Clock::now()-last_message>receive_idle_limit) {
+                        op.Cancel();throw std::runtime_error("pool idle limit reached without any message");
+                    }
                 }
                 const auto size=op.get();if(!size)throw std::runtime_error("pool closed connection");
                 std::vector<std::uint8_t> bytes(size);reader.ReadBytes(bytes);
@@ -127,7 +157,20 @@ struct Pool {
                     auto line=buffer.substr(0,end);buffer.erase(0,end+1);
                     const auto message=JsonObject::Parse(to_hstring(line));
                     std::lock_guard<std::mutex> lock(mutex);
-                    if(message.GetNamedString(L"method",L"")==L"mining.notify") {
+                    ++messages;
+                    const auto method=to_string(message.GetNamedString(L"method",L""));
+                    if(method=="mining.notify") {
+                        ++notifies;log_line("notify",0,to_string(message.GetNamedObject(L"params").GetNamedString(L"target",L"")),line.size());
+                    } else if(!method.empty()) {
+                        ++unknown_methods;log_line("unhandled_method",0,method,line.size()); // e.g. set_difficulty/ping: observe first
+                    } else {
+                        double response_id=-1;
+                        if(message.HasKey(L"id") && message.GetNamedValue(L"id").ValueType()==JsonValueType::Number)response_id=message.GetNamedNumber(L"id");
+                        const bool has_error=message.HasKey(L"error") && message.GetNamedValue(L"error").ValueType()!=JsonValueType::Null;
+                        log_line("response",response_id,has_error?"error":"ok",line.size());
+                    }
+                    last_message=Clock::now();
+                    if(method=="mining.notify") {
                         const auto p=message.GetNamedObject(L"params");
                         if(p.GetNamedNumber(L"cert_version",0)!=3) {
                             fatal=true;throw std::runtime_error("unsupported Pearl certificate version; mining stopped");
@@ -157,12 +200,12 @@ struct Pool {
     }
     std::optional<Job> current() {
         std::lock_guard<std::mutex> lock(mutex);
-        if(!authorized || dead || !job || Clock::now()-job->received>std::chrono::seconds(60))return {};
+        if(!authorized || dead || !job || Clock::now()-job->received>job_max_age)return {};
         return job;
     }
     bool submit(const Job& j,const pearl::Bytes& proof) {
         std::lock_guard<std::mutex> lock(mutex);
-        if(dead||!authorized||!job||job->sequence!=j.sequence||Clock::now()-job->received>std::chrono::seconds(60))return false;
+        if(dead||!authorized||!job||job->sequence!=j.sequence||Clock::now()-job->received>job_max_age)return false;
         if(pending.size()>=8)throw std::runtime_error("pool acknowledgements missing; refusing to accumulate submissions");
         const auto id=next_id++;
         JsonObject p,request;
@@ -207,11 +250,14 @@ JsonObject run_mining_session(const JsonObject& config) {
     std::uint64_t batches=0,attempts=0,submitted=0,accepted=0,rejected=0,reconnects=0;
     double work_units=0,gpu_seconds=0;bool sample_saved=false;std::string error;
     double preparation_seconds=0,preparation_wait_seconds=0,gpu_wall_seconds=0,cpu_results_seconds=0;
-    std::uint64_t discarded_prepared_work=0;
+    std::uint64_t discarded_prepared_work=0,discarded_ready_on_job_change=0;
+    double cpu_dispose_seconds=0,no_job_seconds=0,connect_to_first_batch_seconds=0;
+    std::uint64_t pool_messages=0,pool_notifies=0,pool_unknown_methods=0;
     JsonObject status;
     auto record=[&](const char* stage,Pool* pool) {
         std::uint64_t s=0,a=0,r=0;bool auth=false;std::string connection_error,response;
-        if(pool){std::lock_guard<std::mutex> lock(pool->mutex);s=pool->submitted;a=pool->accepted;r=pool->rejected;auth=pool->authorized;connection_error=pool->error;response=pool->last_response;}
+        if(pool){std::lock_guard<std::mutex> lock(pool->mutex);s=pool->submitted;a=pool->accepted;r=pool->rejected;auth=pool->authorized;connection_error=pool->error;response=pool->last_response;
+            pool_messages=pool->messages;pool_notifies=pool->notifies;pool_unknown_methods=pool->unknown_methods;}
         const auto elapsed=std::chrono::duration<double>(Clock::now()-start).count();
         string_field(status,L"stage",stage);string_field(status,L"error",connection_error.empty()?error:connection_error);
         if(!response.empty())string_field(status,L"last_submit_response",response);
@@ -237,6 +283,13 @@ JsonObject run_mining_session(const JsonObject& config) {
         number_field(status,L"cpu_results_seconds",cpu_results_seconds);
         number_field(status,L"gpu_kernel_duty_percent",elapsed>0?100*gpu_seconds/elapsed:0);
         number_field(status,L"discarded_prepared_work",static_cast<double>(discarded_prepared_work));
+        number_field(status,L"discarded_ready_on_job_change",static_cast<double>(discarded_ready_on_job_change));
+        number_field(status,L"cpu_dispose_seconds",cpu_dispose_seconds);
+        number_field(status,L"no_job_seconds",no_job_seconds);
+        number_field(status,L"connect_to_first_batch_seconds",connect_to_first_batch_seconds);
+        number_field(status,L"pool_messages",static_cast<double>(pool_messages));
+        number_field(status,L"pool_notifies",static_cast<double>(pool_notifies));
+        number_field(status,L"pool_unhandled_methods",static_cast<double>(pool_unknown_methods));
         number_field(status,L"reported_logical_processors",std::thread::hardware_concurrency());
         number_field(status,L"cpu_blake3_simd_degree",static_cast<double>(pearl::cpu_blake3_simd_degree()));
         const auto cpu_now=process_cpu_seconds();
@@ -256,15 +309,16 @@ JsonObject run_mining_session(const JsonObject& config) {
         if(!pool){++reconnects;record("reconnecting",nullptr);std::this_thread::sleep_for(std::chrono::seconds(3));continue;}
         auto preparation=std::make_unique<pearl::WorkQueue>(shape,workers);
         std::uint64_t preparation_generation=0;
+        const auto connection_start=Clock::now();bool first_batch_done=false;
         error.clear();
         while(!pool->dead && should_continue()) {
             if(Clock::now()-last_save>std::chrono::seconds(5))record("running",pool.get());
             const auto job=pool->current();
-            if(!job){std::this_thread::sleep_for(std::chrono::milliseconds(100));continue;}
+            if(!job){std::this_thread::sleep_for(std::chrono::milliseconds(100));no_job_seconds+=0.1;continue;}
             if(job->sequence!=preparation_generation) {
                 com_array<std::uint8_t> random;CryptographicBuffer::CopyToByteArray(CryptographicBuffer::GenerateRandom(32),random);
                 pearl::Hash seed{};std::copy(random.begin(),random.end(),seed.begin());
-                preparation->set_job(job->header,job->sequence,seed);preparation_generation=job->sequence;
+                discarded_ready_on_job_change+=preparation->set_job(job->header,job->sequence,seed);preparation_generation=job->sequence;
             }
             auto phase_start=Clock::now();
             auto prepared=preparation->take_for(std::chrono::milliseconds(50));
@@ -274,6 +328,7 @@ JsonObject run_mining_session(const JsonObject& config) {
             if(!latest || prepared->generation!=latest->sequence) {++discarded_prepared_work;continue;}
             const auto& work=*prepared->work;
             preparation_seconds+=prepared->preparation_seconds;
+            if(!first_batch_done){first_batch_done=true;connect_to_first_batch_seconds+=std::chrono::duration<double>(Clock::now()-connection_start).count();}
             phase_start=Clock::now();
             const auto gpu=run_gpu_work(shape,work.noised,false);
             gpu_wall_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
@@ -289,8 +344,12 @@ JsonObject run_mining_session(const JsonObject& config) {
                 string_field(sample,L"jackpot_le",pearl::to_hex(pearl::jackpot_hash(work.transcript(gpu.output,0),work.seeds.a)));
                 sample.Insert(L"submitted",JsonValue::CreateBooleanValue(false));save_text(L"pearl-live-sample.json",sample);sample_saved=true;
             }
+            // Batched keyed BLAKE3 over the compact readback (16 LE words per tile); identical to
+            // jackpot_hash per tile (tests/merkle_batched_test.cpp), one SIMD call per 64 tiles.
+            std::vector<pearl::Hash> hashes(shape.tiles());
+            pearl::jackpot_hash_many(gpu.output.data(),shape.tiles(),work.seeds.a,hashes.data());
             for(std::size_t tile=0;tile<shape.tiles();++tile) {
-                const auto hash=pearl::jackpot_hash(work.transcript(gpu.output,tile),work.seeds.a);
+                const auto& hash=hashes[tile];
                 if(!pearl::meets_base_target(hash,job->target,shape))continue;
                 check_tile(work,gpu,tile);
                 const auto proof=work.proof(static_cast<std::uint32_t>(tile/(shape.n/16)),static_cast<std::uint32_t>(tile%(shape.n/16)));
@@ -302,6 +361,9 @@ JsonObject run_mining_session(const JsonObject& config) {
                 catch(const std::exception& e){error=e.what();pool->dead=true;break;}
             }
             cpu_results_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
+            phase_start=Clock::now();
+            prepared.reset(); // ~48 MiB of vectors; previously untimed at the end of the iteration
+            cpu_dispose_seconds+=std::chrono::duration<double>(Clock::now()-phase_start).count();
         }
         preparation.reset(); // Join CPU workers before disposing of this pool session.
         bool fatal;
