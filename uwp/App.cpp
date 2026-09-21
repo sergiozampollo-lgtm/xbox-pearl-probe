@@ -2,20 +2,21 @@
 #include "GpuProbe.h"
 #include "pearl_core.h"
 #include <Windows.h>
-#include <roapi.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Windows.ApplicationModel.Core.h>
 #include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.Profile.h>
 #include <winrt/Windows.UI.Core.h>
 #include <thread>
 
 using namespace winrt;
-using namespace Windows::ApplicationModel::Core;
-using namespace Windows::Data::Json;
-using namespace Windows::Storage;
-using namespace Windows::UI::Core;
+using namespace winrt::Windows::ApplicationModel::Core;
+using namespace winrt::Windows::Data::Json;
+using namespace winrt::Windows::Storage;
+using namespace winrt::Windows::UI::Core;
 
 namespace {
 void write_result(const JsonObject& result) {
@@ -39,7 +40,6 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
         std::thread([dispatcher] {
             // WinRT must be initialized before constructing even a JsonObject.
             try {
-                check_hresult(RoInitialize(RO_INIT_MULTITHREADED));
                 init_apartment(apartment_type::multi_threaded);
             } catch (...) {
                 OutputDebugStringW(L"PearlProbe: worker WinRT initialization failed\n");
@@ -53,8 +53,8 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                 result.Insert(L"mining_enabled",JsonValue::CreateBooleanValue(false));
                 result.Insert(L"shares_submitted",JsonValue::CreateNumberValue(0));
                 result.Insert(L"scope",JsonValue::CreateStringValue(L"V3 seeds + synthetic integer matmul/transcript, not a mining proof"));
-                result.Insert(L"device_family",JsonValue::CreateStringValue(Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamily()));
-                result.Insert(L"os_version",JsonValue::CreateStringValue(Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamilyVersion()));
+                result.Insert(L"device_family",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamily()));
+                result.Insert(L"os_version",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamilyVersion()));
                 write_result(result);
                 result.Insert(L"core_checks",JsonValue::CreateNumberValue(pearl::self_test()));
                 result.Insert(L"stage",JsonValue::CreateStringValue(L"d3d12_matmul_transcript"));
@@ -83,7 +83,6 @@ IFrameworkView App::CreateView() { return make<ProbeView>(); }
 
 int __stdcall wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
     try {
-        check_hresult(RoInitialize(RO_INIT_MULTITHREADED));
         init_apartment(apartment_type::multi_threaded);
         CoreApplication::Run(make<winrt::PearlProbe::implementation::App>());
         return 0;
