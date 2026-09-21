@@ -7,7 +7,9 @@ demonstrada.** Sem essa configuração, executa apenas o diagnóstico offline.
 
 ## O que está implementado
 
-- BLAKE3 portátil em C, obtido do projeto oficial e fixado por versão e SHA-256.
+- BLAKE3 oficial em C, fixado por versão e SHA-256, com seleção em execução entre
+  portátil, SSE2, SSE4.1 e AVX2 conforme suporte detectado na CPU e no sistema.
+  AVX-512 permanece excluído. O Mac ARM usa a implementação portátil.
 - Derivação das sementes de ruído de provas Pearl V3 para matrizes densas.
 - Geração de matrizes, ruído de consenso, árvores BLAKE3 e aberturas de linhas.
 - Serialização canônica de `PlainProof` densa V3, rank 128 e blocos de 16×16.
@@ -149,7 +151,7 @@ capturas de tela e diagnósticos pessoais **não fazem parte deste projeto**.
   sementes, ruído, provas, verificação e árvores Merkle (arquivos e hashes em
   `third_party/sources.json`).
 - [BLAKE3](https://github.com/BLAKE3-team/BLAKE3/tree/6aab490a26124663329dfd3961b8469f8fdb158b):
-  implementação C portátil e vetores de teste oficiais.
+  implementações C portátil/SIMD e vetores de teste oficiais.
 - [xllama](https://github.com/gianlucamazza/xllama/tree/3d2cfae8b81fbdece799228538366650e1c41338):
   referência de compilação UWP e carregamento tardio do D3D12 já testados em Xbox.
 

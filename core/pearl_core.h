@@ -18,6 +18,7 @@ struct Seeds { Hash a; Hash b; };
 Seeds seeds_v3(const Hash& job_key, const Hash& root_a, const Hash& root_b,
                std::uint32_t m, std::uint32_t n);
 Hash jackpot_hash(const Transcript& transcript, const Hash& a_seed);
+std::size_t cpu_blake3_simd_degree();
 
 // Deliberately a fixed diagnostic subset, not a full consensus validator.
 // Contiguous 16x16 hash tiles, rank 128, no MoE, dimensions multiples of 16.

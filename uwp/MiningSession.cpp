@@ -238,6 +238,7 @@ JsonObject run_mining_session(const JsonObject& config) {
         number_field(status,L"gpu_kernel_duty_percent",elapsed>0?100*gpu_seconds/elapsed:0);
         number_field(status,L"discarded_prepared_work",static_cast<double>(discarded_prepared_work));
         number_field(status,L"reported_logical_processors",std::thread::hardware_concurrency());
+        number_field(status,L"cpu_blake3_simd_degree",static_cast<double>(pearl::cpu_blake3_simd_degree()));
         const auto cpu_now=process_cpu_seconds();
         status.Insert(L"process_cpu_time_available",JsonValue::CreateBooleanValue(bool(cpu_start)&&bool(cpu_now)));
         if(cpu_start && cpu_now) {

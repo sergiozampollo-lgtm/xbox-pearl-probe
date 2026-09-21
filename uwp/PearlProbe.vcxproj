@@ -36,7 +36,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Generated;$(ProjectDir)Generated Files;$(IntDir)Generated Files;$(ProjectDir)..\core;$(ProjectDir)..\third_party\blake3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;BLAKE3_NO_SSE2;BLAKE3_NO_SSE41;BLAKE3_NO_AVX2;BLAKE3_NO_AVX512;BLAKE3_USE_NEON=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;BLAKE3_NO_AVX512;BLAKE3_USE_NEON=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>stdc11</LanguageStandard_C>
       <CompileAsWinRT>false</CompileAsWinRT>
@@ -72,6 +72,12 @@
     <ClCompile Include="..\third_party\blake3\blake3.c" />
     <ClCompile Include="..\third_party\blake3\blake3_dispatch.c" />
     <ClCompile Include="..\third_party\blake3\blake3_portable.c" />
+    <ClCompile Include="..\third_party\blake3\blake3_sse2.c" />
+    <ClCompile Include="..\third_party\blake3\blake3_sse41.c" />
+    <ClCompile Include="..\third_party\blake3\blake3_avx2.c">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets" />

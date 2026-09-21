@@ -1,19 +1,32 @@
 cmake_minimum_required(VERSION 3.20)
 project(xbox_pearl_probe VERSION 0.1.0 LANGUAGES C CXX)
 
-add_library(blake3_portable STATIC
+add_library(blake3_cpu STATIC
   third_party/blake3/blake3.c
   third_party/blake3/blake3_dispatch.c
   third_party/blake3/blake3_portable.c)
-target_include_directories(blake3_portable PUBLIC third_party/blake3)
-target_compile_definitions(blake3_portable PRIVATE
-  BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512 BLAKE3_USE_NEON=0)
-set_target_properties(blake3_portable PROPERTIES C_STANDARD 11)
+target_include_directories(blake3_cpu PUBLIC third_party/blake3)
+target_compile_definitions(blake3_cpu PRIVATE BLAKE3_NO_AVX512 BLAKE3_USE_NEON=0)
+option(PEARL_ENABLE_X86_SIMD "Build runtime-dispatched SSE2/SSE4.1/AVX2 hashing on x86-64" ON)
+if(PEARL_ENABLE_X86_SIMD AND (CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$" OR CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64"))
+  target_sources(blake3_cpu PRIVATE third_party/blake3/blake3_sse2.c
+    third_party/blake3/blake3_sse41.c third_party/blake3/blake3_avx2.c)
+  if(MSVC)
+    set_source_files_properties(third_party/blake3/blake3_avx2.c PROPERTIES COMPILE_OPTIONS "/arch:AVX2;/GL-")
+  else()
+    set_source_files_properties(third_party/blake3/blake3_sse2.c PROPERTIES COMPILE_OPTIONS "-msse2")
+    set_source_files_properties(third_party/blake3/blake3_sse41.c PROPERTIES COMPILE_OPTIONS "-msse4.1")
+    set_source_files_properties(third_party/blake3/blake3_avx2.c PROPERTIES COMPILE_OPTIONS "-mavx2")
+  endif()
+else()
+  target_compile_definitions(blake3_cpu PRIVATE BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2)
+endif()
+set_target_properties(blake3_cpu PROPERTIES C_STANDARD 11)
 
 find_package(Threads REQUIRED)
 add_library(pearl_core STATIC core/pearl_core.cpp core/pearl_proof.cpp core/self_test.cpp core/work_queue.cpp)
 target_include_directories(pearl_core PUBLIC core)
-target_link_libraries(pearl_core PRIVATE blake3_portable Threads::Threads)
+target_link_libraries(pearl_core PRIVATE blake3_cpu Threads::Threads)
 target_compile_features(pearl_core PUBLIC cxx_std_17)
 if(MSVC)
   target_compile_options(pearl_core PRIVATE /W4 /WX)

@@ -1,10 +1,12 @@
 #include "pearl_core.h"
-#include "blake3.h"
+#include "blake3_impl.h"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
 
 namespace pearl {
+std::size_t cpu_blake3_simd_degree() { return blake3_simd_degree(); }
+
 Hash digest(const void* data, std::size_t size, const Hash* key) {
     blake3_hasher state;
     if (key) blake3_hasher_init_keyed(&state, key->data());

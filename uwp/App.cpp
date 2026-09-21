@@ -60,6 +60,7 @@ struct ProbeView : implements<ProbeView,IFrameworkView> {
                 result.Insert(L"os_version",JsonValue::CreateStringValue(winrt::Windows::System::Profile::AnalyticsInfo::VersionInfo().DeviceFamilyVersion()));
                 write_result(result);
                 result.Insert(L"core_checks",JsonValue::CreateNumberValue(pearl::self_test()));
+                result.Insert(L"cpu_blake3_simd_degree",JsonValue::CreateNumberValue(static_cast<double>(pearl::cpu_blake3_simd_degree())));
                 auto config_file=ApplicationData::Current().LocalFolder().TryGetItemAsync(L"pearl-mining-config.json").get();
                 if(config_file) {
                     const auto config=JsonObject::Parse(FileIO::ReadTextAsync(config_file.as<StorageFile>()).get());

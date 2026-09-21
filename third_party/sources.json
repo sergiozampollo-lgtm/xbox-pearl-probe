@@ -129,5 +129,26 @@
     "path": "pearl-blake3/src/merkle.rs",
     "sha256": "5372a95d7e7e3563eb537a0b98522080cbaa5656ba08452e9d467eaa56e12961",
     "usage": "dense V3 noise, Merkle openings, serialization and target normalization reference"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_sse2.c",
+    "sha256": "51194fff1b0e9cb79f4db6fc148a3b34f683ca6ec3a260d66166e0f7d5b7012e",
+    "usage": "unmodified CPU SIMD implementation; runtime feature dispatch"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_sse41.c",
+    "sha256": "1f38e2ca58aa59af094f492f1326957b423d7a25e32daaae159fcc1966949f58",
+    "usage": "unmodified CPU SIMD implementation; runtime feature dispatch"
+  },
+  {
+    "repo": "BLAKE3-team/BLAKE3",
+    "commit": "6aab490a26124663329dfd3961b8469f8fdb158b",
+    "path": "c/blake3_avx2.c",
+    "sha256": "8b3516a8e42d981a9868ef670b1698f6d10207283086bd810b11cdaac1aca8f1",
+    "usage": "unmodified CPU SIMD implementation; runtime feature dispatch"
   }
 ]
